@@ -1,0 +1,9 @@
+flask
+flask-cors
+transformers
+torch
+numpy
+beautifulsoup4
+selenium
+requests
+lxml

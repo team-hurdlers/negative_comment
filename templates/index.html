@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>부정댓글 탐지기</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 40px;
+            max-width: 800px;
+            width: 100%;
+        }
+        
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+        }
+        
+        .input-section {
+            margin-bottom: 30px;
+        }
+        
+        .tab-buttons {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .tab-btn {
+            padding: 10px 20px;
+            border: none;
+            background: #f0f0f0;
+            cursor: pointer;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: all 0.3s;
+        }
+        
+        .tab-btn.active {
+            background: #667eea;
+            color: white;
+        }
+        
+        input[type="url"] {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+            margin-bottom: 10px;
+            transition: border-color 0.3s;
+        }
+        
+        input[type="url"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .supported-sites {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+            margin-bottom: 15px;
+        }
+        
+        .product-info {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-left: 5px solid #667eea;
+        }
+        
+        .product-title {
+            font-size: 20px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 10px;
+        }
+        
+        .product-price {
+            font-size: 18px;
+            color: #667eea;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        textarea {
+            width: 100%;
+            min-height: 150px;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+            resize: vertical;
+            transition: border-color 0.3s;
+        }
+        
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .analyze-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 18px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: block;
+            margin: 20px auto;
+        }
+        
+        .analyze-btn:hover {
+            background: #5a67d8;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        .analyze-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .results {
+            margin-top: 30px;
+            display: none;
+        }
+        
+        .result-card {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 15px;
+            border-left: 5px solid #667eea;
+        }
+        
+        .result-card.negative {
+            border-left-color: #e74c3c;
+            background: #ffe5e5;
+        }
+        
+        .result-card.positive {
+            border-left-color: #27ae60;
+            background: #e5ffe5;
+        }
+        
+        .result-label {
+            font-weight: bold;
+            font-size: 20px;
+            margin-bottom: 10px;
+        }
+        
+        .result-text {
+            color: #555;
+            margin-bottom: 10px;
+            line-height: 1.6;
+        }
+        
+        .result-score {
+            font-size: 14px;
+            color: #777;
+        }
+        
+        .summary {
+            background: #f0f0f0;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+        
+        .summary h3 {
+            margin-bottom: 15px;
+            color: #333;
+        }
+        
+        .summary-stats {
+            display: flex;
+            justify-content: space-around;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        
+        .stat {
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #667eea;
+        }
+        
+        .stat-label {
+            font-size: 14px;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+        
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .error {
+            background: #fee;
+            color: #c00;
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 부정댓글 탐지기</h1>
+        
+        <div class="input-section">
+            <div class="tab-buttons">
+                <button class="tab-btn active" onclick="switchTab('single')">단일 텍스트 분석</button>
+                <button class="tab-btn" onclick="switchTab('batch')">다중 텍스트 분석</button>
+                <button class="tab-btn" onclick="switchTab('url')">🛒 쇼핑몰 URL 분석</button>
+            </div>
+            
+            <div id="single-tab" class="tab-content active">
+                <textarea id="single-text" placeholder="분석할 텍스트를 입력하세요..."></textarea>
+                <button class="analyze-btn" onclick="analyzeSingle()">분석하기</button>
+            </div>
+            
+            <div id="batch-tab" class="tab-content">
+                <textarea id="batch-text" placeholder="여러 텍스트를 입력하세요 (줄바꿈으로 구분)..."></textarea>
+                <button class="analyze-btn" onclick="analyzeBatch()">일괄 분석하기</button>
+            </div>
+            
+            <div id="url-tab" class="tab-content">
+                <input type="url" id="product-url" placeholder="쇼핑몰 제품 URL을 입력하세요 (예: https://www.coupang.com/...)">
+                <div class="supported-sites">
+                    지원 사이트: 쿠팡, 네이버 쇼핑, 11번가, G마켓, 옥션, 인터파크 등
+                </div>
+                <button class="analyze-btn" onclick="analyzeURL()">리뷰 크롤링 및 분석</button>
+            </div>
+        </div>
+        
+        <div class="loading">
+            <div class="spinner"></div>
+            <p style="margin-top: 15px;">분석 중...</p>
+        </div>
+        
+        <div class="error" id="error"></div>
+        
+        <div class="results" id="results"></div>
+    </div>
+    
+    <script>
+        function switchTab(tab) {
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            
+            if (tab === 'single') {
+                document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
+                document.getElementById('single-tab').classList.add('active');
+            } else if (tab === 'batch') {
+                document.querySelector('.tab-btn:nth-child(2)').classList.add('active');
+                document.getElementById('batch-tab').classList.add('active');
+            } else if (tab === 'url') {
+                document.querySelector('.tab-btn:nth-child(3)').classList.add('active');
+                document.getElementById('url-tab').classList.add('active');
+            }
+            
+            document.getElementById('results').style.display = 'none';
+            document.getElementById('error').style.display = 'none';
+        }
+        
+        async function analyzeSingle() {
+            const text = document.getElementById('single-text').value.trim();
+            if (!text) {
+                showError('텍스트를 입력해주세요.');
+                return;
+            }
+            
+            showLoading(true);
+            hideError();
+            
+            try {
+                const response = await fetch('/analyze', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ text })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    displaySingleResult(data);
+                } else {
+                    showError(data.error || '분석 중 오류가 발생했습니다.');
+                }
+            } catch (error) {
+                showError('서버 연결 오류: ' + error.message);
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        async function analyzeBatch() {
+            const text = document.getElementById('batch-text').value.trim();
+            if (!text) {
+                showError('텍스트를 입력해주세요.');
+                return;
+            }
+            
+            const texts = text.split('\n').filter(t => t.trim());
+            if (texts.length === 0) {
+                showError('유효한 텍스트를 입력해주세요.');
+                return;
+            }
+            
+            showLoading(true);
+            hideError();
+            
+            try {
+                const response = await fetch('/batch_analyze', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ texts })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    displayBatchResults(data);
+                } else {
+                    showError(data.error || '분석 중 오류가 발생했습니다.');
+                }
+            } catch (error) {
+                showError('서버 연결 오류: ' + error.message);
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        function displaySingleResult(data) {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = `
+                <div class="result-card ${data.is_negative ? 'negative' : 'positive'}">
+                    <div class="result-label">
+                        ${data.is_negative ? '⚠️ 부정적' : '✅ 긍정적'} 댓글
+                    </div>
+                    <div class="result-text">${escapeHtml(data.text)}</div>
+                    <div class="result-score">신뢰도: ${data.score}%</div>
+                </div>
+            `;
+            resultsDiv.style.display = 'block';
+        }
+        
+        function displayBatchResults(data) {
+            const resultsDiv = document.getElementById('results');
+            let html = '';
+            
+            data.results.forEach(result => {
+                html += `
+                    <div class="result-card ${result.is_negative ? 'negative' : 'positive'}">
+                        <div class="result-label">
+                            ${result.is_negative ? '⚠️ 부정적' : '✅ 긍정적'}
+                        </div>
+                        <div class="result-text">${escapeHtml(result.text)}</div>
+                        <div class="result-score">신뢰도: ${result.score}%</div>
+                    </div>
+                `;
+            });
+            
+            html += `
+                <div class="summary">
+                    <h3>📊 분석 요약</h3>
+                    <div class="summary-stats">
+                        <div class="stat">
+                            <div class="stat-value">${data.summary.total}</div>
+                            <div class="stat-label">전체 댓글</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value" style="color: #e74c3c;">${data.summary.negative}</div>
+                            <div class="stat-label">부정 댓글</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value" style="color: #27ae60;">${data.summary.positive}</div>
+                            <div class="stat-label">긍정 댓글</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value">${data.summary.negative_ratio}%</div>
+                            <div class="stat-label">부정 비율</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            resultsDiv.innerHTML = html;
+            resultsDiv.style.display = 'block';
+        }
+        
+        function showLoading(show) {
+            document.querySelector('.loading').style.display = show ? 'block' : 'none';
+            document.querySelectorAll('.analyze-btn').forEach(btn => btn.disabled = show);
+        }
+        
+        function showError(message) {
+            const errorDiv = document.getElementById('error');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+        }
+        
+        function hideError() {
+            document.getElementById('error').style.display = 'none';
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        async function analyzeURL() {
+            const url = document.getElementById('product-url').value.trim();
+            if (!url) {
+                showError('URL을 입력해주세요.');
+                return;
+            }
+            
+            if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                showError('올바른 URL 형식을 입력해주세요. (http:// 또는 https://로 시작)');
+                return;
+            }
+            
+            showLoading(true);
+            hideError();
+            
+            try {
+                const response = await fetch('/crawl_and_analyze', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ url })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    displayURLResults(data);
+                } else {
+                    showError(data.error || '크롤링 중 오류가 발생했습니다.');
+                }
+            } catch (error) {
+                showError('서버 연결 오류: ' + error.message);
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        function displayURLResults(data) {
+            const resultsDiv = document.getElementById('results');
+            let html = '';
+            
+            // 제품 정보 표시
+            if (data.product) {
+                html += `
+                    <div class="product-info">
+                        <div class="product-title">📦 ${escapeHtml(data.product.title)}</div>
+                        ${data.product.price ? `<div class="product-price">💰 ${escapeHtml(data.product.price)}원</div>` : ''}
+                    </div>
+                `;
+            }
+            
+            // 요약 통계
+            html += `
+                <div class="summary">
+                    <h3>📊 리뷰 분석 결과</h3>
+                    <div class="summary-stats">
+                        <div class="stat">
+                            <div class="stat-value">${data.summary.total}</div>
+                            <div class="stat-label">전체 리뷰</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value" style="color: #e74c3c;">${data.summary.negative}</div>
+                            <div class="stat-label">부정 리뷰</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value" style="color: #27ae60;">${data.summary.positive}</div>
+                            <div class="stat-label">긍정 리뷰</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value">${data.summary.negative_ratio}%</div>
+                            <div class="stat-label">부정 비율</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // 주요 부정 리뷰
+            if (data.top_negative && data.top_negative.length > 0) {
+                html += '<h3 style="margin: 30px 0 15px;">⚠️ 주요 부정 리뷰</h3>';
+                data.top_negative.forEach(review => {
+                    html += `
+                        <div class="result-card negative">
+                            <div class="result-text">${escapeHtml(review.text)}</div>
+                            <div class="result-score">신뢰도: ${review.score}%</div>
+                        </div>
+                    `;
+                });
+            }
+            
+            // 주요 긍정 리뷰
+            if (data.top_positive && data.top_positive.length > 0) {
+                html += '<h3 style="margin: 30px 0 15px;">✅ 주요 긍정 리뷰</h3>';
+                data.top_positive.forEach(review => {
+                    html += `
+                        <div class="result-card positive">
+                            <div class="result-text">${escapeHtml(review.text)}</div>
+                            <div class="result-score">신뢰도: ${review.score}%</div>
+                        </div>
+                    `;
+                });
+            }
+            
+            resultsDiv.innerHTML = html;
+            resultsDiv.style.display = 'block';
+        }
+    </script>
+</body>
+</html>
