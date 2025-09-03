@@ -1,0 +1,23 @@
+{
+  "cafe24": {
+    "client_id": "8k71HYZfIiqcveBW2H1UFI",
+    "client_secret": "ahgmoZZfFCLE1ENL7XMsEH",
+    "mall_id": "cila01",
+    "redirect_uri": "https://cafe24-oauth-final.loca.lt/callback"
+  },
+  "analysis": {
+    "confidence_threshold": 0.7,
+    "model_name": "nlptown/bert-base-multilingual-uncased-sentiment",
+    "fallback_model": "cardiffnlp/twitter-roberta-base-sentiment-latest"
+  },
+  "monitoring": {
+    "check_interval": 3600,
+    "max_reviews_per_check": 100,
+    "notification_enabled": true
+  },
+  "app": {
+    "debug": true,
+    "port": 5001,
+    "host": "0.0.0.0"
+  }
+}
