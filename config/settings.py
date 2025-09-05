@@ -17,6 +17,7 @@ class Settings:
         self.WEBHOOK_EVENT_KEY = os.getenv("WEBHOOK_EVENT_KEY")
         self.kakao_api_key = os.getenv("KAKAO_API_KEY")
         self.kakao_access_token = os.getenv("KAKAO_ACCESS_TOKEN")
+        self.openai_api_key = os.getenv("OPENAI_API_KEY")
 
         
         # 모니터링 설정

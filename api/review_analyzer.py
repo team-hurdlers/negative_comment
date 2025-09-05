@@ -1,45 +1,60 @@
 """
-리뷰 감정 분석기
+리뷰 감정 분석기 - GPT-4o-mini 우선, pkl/transformers 폴백
 """
 
-from transformers import pipeline
+import os
+import pickle
+import json
 import warnings
 from typing import List, Dict, Any
 import re
+from config.settings import settings
 
 warnings.filterwarnings('ignore')
 
 
 class ReviewAnalyzer:
-    """리뷰 감정 분석 클래스"""
+    """리뷰 감정 분석 클래스 - GPT-4o-mini 우선, pkl/transformers 폴백"""
     
     def __init__(self):
-        self.sentiment_analyzer = None
-        self.load_model()
+        self.openai_client = None
+        self.pkl_model = None
+        self.load_models()
         
-    def load_model(self):
-        """감정 분석 모델 로드"""
-        try:
-            # 한국어 감정 분석에 특화된 모델 사용
-            self.sentiment_analyzer = pipeline(
-                "sentiment-analysis",
-                model="nlptown/bert-base-multilingual-uncased-sentiment",
-                device=-1
-            )
-            print("다국어 감정 분석 모델 로드 완료")
-        except Exception as e:
-            print(f"다국어 모델 로드 실패, 기본 모델 시도: {e}")
+    def load_models(self):
+        """감정 분석 모델 로드 - GPT-4o-mini와 pkl만"""
+        # 1순위: OpenAI GPT-4o-mini
+        self._load_openai_client()
+        
+        # 2순위: pkl 모델 (경량)
+        self._load_pkl_model()
+    
+    def _load_openai_client(self):
+        """OpenAI 클라이언트 초기화"""
+        if settings.openai_api_key:
             try:
-                # 백업으로 기본 모델 사용
-                self.sentiment_analyzer = pipeline(
-                    "sentiment-analysis",
-                    model="cardiffnlp/twitter-roberta-base-sentiment-latest",
-                    device=-1
-                )
-                print("영어 감정 분석 모델 로드 완료")
-            except Exception as e2:
-                print(f"모든 모델 로드 실패: {e2}")
-                self.sentiment_analyzer = None
+                import openai
+                self.openai_client = openai.OpenAI(api_key=settings.openai_api_key)
+                print("✅ OpenAI GPT-4o-mini 클라이언트 초기화 완료")
+            except Exception as e:
+                print(f"⚠️ OpenAI 클라이언트 초기화 실패: {e}")
+    
+    def _load_pkl_model(self):
+        """pkl 감정 분석 모델 로드"""
+        model_path = "lightweight_sentiment_model.pkl"
+        
+        if os.path.exists(model_path):
+            try:
+                print(f"경량 감정 분석 모델 로드 시작: {model_path}")
+                with open(model_path, 'rb') as f:
+                    self.pkl_model = pickle.load(f)
+                print("✅ 경량 감정 분석 모델 로드 완료")
+            except Exception as e:
+                print(f"❌ 경량 모델 로드 실패: {e}")
+                self.pkl_model = None
+        else:
+            print(f"⚠️ 모델 파일을 찾을 수 없음: {model_path}")
+    
     
     def clean_text(self, text: str) -> str:
         """텍스트 전처리"""
@@ -58,68 +73,130 @@ class ReviewAnalyzer:
         return text.strip()
     
     def analyze_single_review(self, review_text: str) -> Dict[str, Any]:
-        """단일 리뷰 감정 분석"""
-        try:
-            if not review_text or not self.sentiment_analyzer:
-                return {
-                    'is_negative': False,
-                    'confidence': 0,
-                    'label': '분석불가',
-                    'score': 0,
-                    'error': '텍스트가 없거나 모델 로드 실패'
-                }
-            
-            # 텍스트 전처리
-            clean_text = self.clean_text(review_text)
-            if not clean_text:
-                return {
-                    'is_negative': False,
-                    'confidence': 0,
-                    'label': '분석불가',
-                    'score': 0,
-                    'error': '유효한 텍스트 없음'
-                }
-            
-            # 텍스트 길이 제한 (512자)
-            if len(clean_text) > 512:
-                clean_text = clean_text[:512]
-            
-            # 감정 분석 실행
-            result = self.sentiment_analyzer(clean_text)[0]
-            
-            # 결과 해석
-            is_negative = self._is_negative_result(result)
-            
-            return {
-                'is_negative': is_negative,
-                'confidence': result['score'],
-                'label': '부정적' if is_negative else '긍정적',
-                'score': round(result['score'] * 100, 2),
-                'original_label': result['label']
-            }
-            
-        except Exception as e:
-            print(f"리뷰 분석 오류: {e}")
+        """단일 리뷰 감정 분석 - 다중 방법 폴백"""
+        if not review_text or not review_text.strip():
             return {
                 'is_negative': False,
                 'confidence': 0,
-                'label': '분석실패',
+                'label': '분석불가',
                 'score': 0,
-                'error': str(e)
+                'method': 'none',
+                'error': '텍스트 없음'
             }
+        
+        # 1차 시도: GPT-4o-mini
+        gpt_result = self._analyze_with_gpt(review_text)
+        if gpt_result:
+            return gpt_result
+        
+        # 2차 시도: pkl 모델
+        pkl_result = self._analyze_with_pkl(review_text)
+        if pkl_result:
+            return pkl_result
+        
+        # 모든 방법 실패
+        return {
+            'is_negative': False,
+            'confidence': 0,
+            'label': '분석실패',
+            'score': 0,
+            'method': 'failed',
+            'error': '모든 분석 방법 실패'
+        }
     
-    def _is_negative_result(self, result: Dict) -> bool:
-        """분석 결과가 부정적인지 판단"""
-        label = result['label'].upper()
+    def _analyze_with_gpt(self, review_text: str) -> Dict[str, Any]:
+        """GPT-4o-mini를 이용한 감정 분석"""
+        if not self.openai_client:
+            return None
         
-        # 다양한 모델의 라벨 형식 지원
-        negative_labels = [
-            'NEGATIVE', 'LABEL_0', 'NEG',
-            '1 STAR', '2 STARS',  # 별점 기반
-            'DISAPPROVAL', 'ANGER', 'DISGUST'  # 감정 기반
-        ]
+        try:
+            prompt = f"""
+다음 리뷰의 감정을 분석해주세요. 한국어 리뷰입니다.
+
+리뷰 내용: "{review_text}"
+
+다음 중 하나로 분류해주세요:
+- positive: 긍정적인 리뷰 (만족, 좋음, 추천 등)
+- negative: 부정적인 리뷰 (불만, 나쁨, 비추천 등)  
+- neutral: 중립적인 리뷰 (단순 설명, 객관적 정보 등)
+
+JSON 형태로만 답변해주세요:
+{{
+    "sentiment": "positive|negative|neutral",
+    "confidence": 0.0~1.0,
+    "reasoning": "분석 근거"
+}}
+"""
+            
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "당신은 한국어 리뷰 감정 분석 전문가입니다. JSON 형태로만 답변하세요."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=200,
+                temperature=0.1
+            )
+            
+            result_text = response.choices[0].message.content.strip()
+            
+            # JSON 파싱
+            try:
+                gpt_result = json.loads(result_text)
+                is_negative = gpt_result.get('sentiment') == 'negative'
+                confidence = float(gpt_result.get('confidence', 0.5))
+                
+                return {
+                    'is_negative': is_negative,
+                    'confidence': confidence,
+                    'label': '부정적' if is_negative else '긍정적',
+                    'score': round(confidence * 100, 2),
+                    'method': 'gpt-4o-mini',
+                    'reasoning': gpt_result.get('reasoning', ''),
+                    'original_result': gpt_result
+                }
+            except json.JSONDecodeError:
+                print(f"❌ GPT-4o-mini JSON 파싱 실패: {result_text}")
+                return None
+                
+        except Exception as e:
+            print(f"❌ GPT-4o-mini 분석 실패: {e}")
+            return None
+    
+    def _analyze_with_pkl(self, review_text: str) -> Dict[str, Any]:
+        """pkl 모델을 이용한 감정 분석"""
+        if not self.pkl_model:
+            return None
         
-        return label in negative_labels
+        try:
+            # 텍스트 전처리
+            clean_text = self.clean_text(review_text)
+            if not clean_text:
+                return None
+            
+            # pkl 모델로 예측
+            prediction = self.pkl_model.predict([clean_text])[0]
+            confidence = max(self.pkl_model.predict_proba([clean_text])[0])
+            
+            # 예측 결과를 표준 형태로 변환
+            sentiment_map = {0: 'negative', 1: 'neutral', 2: 'positive'}
+            sentiment = sentiment_map.get(prediction, 'neutral')
+            is_negative = (sentiment == 'negative')
+            
+            return {
+                'is_negative': is_negative,
+                'confidence': float(confidence),
+                'label': '부정적' if is_negative else '긍정적',
+                'score': round(confidence * 100, 2),
+                'method': 'pkl_model',
+                'original_prediction': prediction
+            }
+            
+        except Exception as e:
+            print(f"❌ pkl 모델 분석 실패: {e}")
+            return None
+    
+    
     
     def analyze_reviews_batch(self, reviews: List[Dict]) -> List[Dict]:
         """리뷰 목록 일괄 분석"""
