@@ -1,87 +1,145 @@
 from flask import Flask, request, jsonify, render_template, redirect, session, url_for
 from flask_cors import CORS
-from transformers import pipeline
-from crawler import ShoppingMallCrawler
-from auth import Cafe24OAuth
-from api import Cafe24ReviewAPI, ReviewAnalyzer
-from utils import ConfigManager, NotificationManager
+from auth.cafe24_oauth import Cafe24OAuth
+from api import Cafe24ReviewAPI
+from utils import NotificationManager
 import warnings
 import threading
 import time
 import json
 import os
 import requests
+import numpy as np
 from datetime import datetime
 from urllib.parse import parse_qs, urlparse
 from functools import wraps
-try:
-    from dotenv import load_dotenv
-    load_dotenv()  # .env 파일 로드
-except ImportError:
-    pass
 
 # Settings 클래스 import
-from dotenv import load_dotenv
-
-load_dotenv()
-
-class Settings:
-    def __init__(self):
-        # config.json 파일 로드
-        self.config = self.load_config()
-        
-        # 환경변수에서 로드
-        self.SERVICE_KEY = os.getenv("SERVICE_KEY")
-        self.WEBHOOK_EVENT_KEY = os.getenv("WEBHOOK_EVENT_KEY")
-        self.cafe24_password = os.getenv("CAFE24_PASSWORD")
-        self.cafe24_access_token = os.getenv("CAFE24_ACCESS_TOKEN")
-        self.cafe24_refresh_token = os.getenv("CAFE24_REFRESH_TOKEN")
-        
-        # config.json에서 cafe24 설정 로드
-        cafe24_config = self.config.get('cafe24', {})
-        self.cafe24_client_id = cafe24_config.get('client_id') or os.getenv("CAFE24_CLIENT_ID")
-        self.cafe24_client_secret = cafe24_config.get('client_secret') or os.getenv("CAFE24_CLIENT_SECRET")
-        self.cafe24_mall_id = cafe24_config.get('mall_id') or os.getenv("CAFE24_ID")
-        self.redirect_uri = cafe24_config.get('redirect_uri', "https://cafe24-oauth-final.loca.lt/callback")
-        
-        # 하위 호환성을 위해 cafe24_id 유지
-        self.cafe24_id = self.cafe24_mall_id
-    
-    def load_config(self):
-        """config.json 파일 로드"""
-        try:
-            with open('config.json', 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception as e:
-            print(f"config.json 로드 실패: {e}")
-            return {}
-
-settings = Settings()
+from config.settings import settings
 warnings.filterwarnings('ignore')
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'your-secret-key-here-change-in-production')
 CORS(app)
 
+# Flask 세션용 비밀키 설정 (Gunicorn에서도 동작하도록)
+app.secret_key = settings.SERVICE_KEY or 'dev-secret-key-fallback'
+
 # 설정 및 관리자 초기화
-config = ConfigManager()
 notification_manager = NotificationManager()
 
-# 로그인 설정 (환경변수에서 로드)
-ADMIN_USERNAME = settings.cafe24_id or 'cila01'
-ADMIN_PASSWORD = settings.cafe24_password or 'cila01'
+# OAuth 클라이언트와 Review API를 위한 전역 변수 (나중에 초기화됨)
+oauth_client = None
+review_api = None
 
 # 채널톡 웹훅 설정
 WEBHOOK_EVENT_KEY = settings.WEBHOOK_EVENT_KEY
 WEBHOOK_ENABLED = True
 
-# OAuth 클라이언트 (나중에 설정에서 초기화)
-oauth_client = None
-review_api = None
-analyzer = ReviewAnalyzer()
+# OAuth 클라이언트 lazy initialization 함수
+def get_or_create_oauth_client():
+    """OAuth 클라이언트를 lazy하게 초기화하여 반환"""
+    global oauth_client
+    
+    # 이미 초기화된 경우 기존 클라이언트 반환
+    if oauth_client is not None:
+        return oauth_client
+    
+    # 환경변수 확인
+    if not settings.cafe24_client_id or not settings.cafe24_client_secret:
+        missing = []
+        if not settings.cafe24_client_id:
+            missing.append("CAFE24_CLIENT_ID")
+        if not settings.cafe24_client_secret:
+            missing.append("CAFE24_CLIENT_SECRET")
+        print(f"❌ OAuth 설정이 완료되지 않았습니다. 누락: {', '.join(missing)}")
+        return None
+    
+    # OAuth 클라이언트 생성
+    try:
+        oauth_client = Cafe24OAuth(
+            client_id=settings.cafe24_client_id,
+            client_secret=settings.cafe24_client_secret,
+            mall_id=settings.cafe24_id,
+            redirect_uri=settings.cafe24_redirect_uri
+        )
+        print(f"✅ OAuth 클라이언트 lazy 초기화 완료")
+        print(f"   - Mall ID: {settings.cafe24_id}")
+        print(f"   - Client ID: {settings.cafe24_client_id}")
+        print(f"   - Redirect URI: {settings.cafe24_redirect_uri}")
+        return oauth_client
+        
+    except Exception as e:
+        print(f"❌ OAuth 클라이언트 초기화 실패: {e}")
+        return None
+
+def init_oauth_client():
+    """기존 코드 호환성을 위한 wrapper 함수"""
+    return get_or_create_oauth_client()
+
+
+
+# 경량 분석 함수들
+def analyze_reviews_batch(reviews):
+    """리뷰 목록 일괄 분석 (경량 버전)"""
+    analyzed_reviews = []
+    for review in reviews:
+        # 리뷰 텍스트 추출
+        review_text = review.get('content', '') or review.get('text', '') or review.get('title', '')
+        
+        # 감정 분석 수행
+        analysis_result = analyze_review(review_text)
+        
+        # 원본 리뷰 데이터와 분석 결과 병합
+        analyzed_review = review.copy()
+        analyzed_review.update(analysis_result)
+        analyzed_reviews.append(analyzed_review)
+    
+    return analyzed_reviews
+
+def get_review_statistics(reviews):
+    """리뷰 통계 정보 (경량 버전)"""
+    if not reviews:
+        return {
+            'total': 0,
+            'negative': 0,
+            'positive': 0,
+            'negative_ratio': 0,
+            'positive_ratio': 0,
+            'average_confidence': 0
+        }
+    
+    total = len(reviews)
+    negative_count = sum(1 for r in reviews if r.get('is_negative', False))
+    positive_count = total - negative_count
+    
+    # 평균 신뢰도 계산
+    total_confidence = sum(r.get('confidence', 0) for r in reviews)
+    average_confidence = total_confidence / total if total > 0 else 0
+    
+    return {
+        'total': total,
+        'negative': negative_count,
+        'positive': positive_count,
+        'negative_ratio': round((negative_count / total) * 100, 2),
+        'positive_ratio': round((positive_count / total) * 100, 2),
+        'average_confidence': round(average_confidence * 100, 2)
+    }
+
+def get_negative_reviews(reviews, confidence_threshold=0.7):
+    """부정 리뷰만 필터링 (경량 버전)"""
+    negative_reviews = []
+    
+    for review in reviews:
+        if (review.get('is_negative', False) and 
+            review.get('confidence', 0) >= confidence_threshold):
+            negative_reviews.append(review)
+    
+    # 신뢰도순으로 정렬
+    negative_reviews.sort(key=lambda x: x.get('confidence', 0), reverse=True)
+    
+    return negative_reviews
 
 sentiment_analyzer = None
-crawler = ShoppingMallCrawler()
 
 # 상품명 캐시 (성능 향상을 위해)
 product_cache = {}
@@ -96,9 +154,33 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+def cafe24_auth_required(f):
+    """카페24 API 인증이 필요한 엔드포인트를 보호하는 데코레이터 (웹훅용 - 로그인 불필요)"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not review_api:
+            return jsonify({'error': '카페24 API 인증이 필요합니다.'}), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
+def full_auth_required(f):
+    """사용자 로그인 + 카페24 API 인증 둘 다 필요한 엔드포인트 (프론트엔드 API용)"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # 먼저 사용자 로그인 체크
+        if 'user' not in session:
+            return jsonify({'error': '로그인이 필요합니다.', 'login_required': True}), 401
+        
+        # 그 다음 카페24 API 토큰 체크
+        if not review_api:
+            return jsonify({'error': '카페24 API 인증이 필요합니다.', 'cafe24_auth_required': True}), 401
+        
+        return f(*args, **kwargs)
+    return decorated_function
+
 def verify_credentials(username, password):
     """사용자 인증 확인"""
-    return username == ADMIN_USERNAME and password == ADMIN_PASSWORD
+    return username == settings.cafe24_id and password == settings.cafe24_password
 
 def verify_webhook_event_key(event_key):
     """채널톡 웹훅 이벤트 키 검증"""
@@ -279,11 +361,14 @@ def trigger_review_collection():
             print(f"📝 신규 리뷰 {len(new_reviews)}개에 대해 감정 분석 시작...")
             
             # 신규 리뷰들만 감정 분석 수행
-            analyzed_reviews = analyzer.analyze_reviews_batch(new_reviews)
+            analyzed_reviews = analyze_reviews_batch(new_reviews)
             negative_reviews = [r for r in analyzed_reviews if r.get('is_negative', False)]
             
             if negative_reviews:
                 print(f"🚨 신규 부정 리뷰 {len(negative_reviews)}개 발견!")
+                
+                # 카카오톡 알림 전송
+                notification_manager.send_review_alert_to_kakao(new_reviews, negative_reviews)
                 
                 for review in negative_reviews:
                     content_text = review.get('content', '') or review.get('title', '')
@@ -303,6 +388,10 @@ def trigger_review_collection():
                     )
             else:
                 print(f"😊 신규 리뷰 {len(new_reviews)}개는 모두 긍정적/중성적입니다.")
+                
+                # 일반 신규 리뷰도 알림 전송 (설정에 따라)
+                if settings.notification_enabled:
+                    notification_manager.send_review_alert_to_kakao(new_reviews, [])
                 
             print(f"✅ 신규 리뷰 분석 완료: 총 {len(new_reviews)}개, 부정 {len(negative_reviews)}개")
         else:
@@ -347,93 +436,51 @@ def enrich_reviews_with_product_names(reviews):
     
     return enriched_reviews
 
-# OAuth 클라이언트 초기화 함수
-class SimpleCafe24API:
-    """간단한 카페24 API 클라이언트 (직접 토큰 사용)"""
-    
-    def __init__(self, mall_id, access_token, refresh_token=None):
-        self.mall_id = mall_id
-        self.access_token = access_token
-        self.refresh_token = refresh_token
-        self.base_url = f"https://{mall_id}.cafe24api.com/api/v2"
-        
-    def _get_headers(self):
-        return {
-            'Authorization': f'Bearer {self.access_token}',
-            'Content-Type': 'application/json',
-            'X-Cafe24-Api-Version': '2022-03-01'
-        }
-    
-    def get_products(self, limit=10):
-        """상품 목록 조회"""
-        try:
-            url = f"{self.base_url}/admin/products"
-            params = {'limit': limit}
-            
-            response = requests.get(url, headers=self._get_headers(), params=params)
-            response.raise_for_status()
-            
-            return response.json()
-        except Exception as e:
-            print(f"상품 조회 오류: {e}")
-            return None
-    
-    def get_reviews(self, limit=10):
-        """리뷰 목록 조회"""
-        try:
-            url = f"{self.base_url}/admin/boards/review/articles"
-            params = {'limit': limit}
-            
-            response = requests.get(url, headers=self._get_headers(), params=params)
-            response.raise_for_status()
-            
-            return response.json()
-        except Exception as e:
-            print(f"리뷰 조회 오류: {e}")
-            return None
-
 def init_cafe24_client():
-    """카페24 API 클라이언트 초기화 (직접 토큰 사용)"""
+    """카페24 API 클라이언트 초기화 (OAuth 클라이언트 사용)"""
     global review_api
     
-    if settings.cafe24_access_token and settings.cafe24_mall_id:
+    # OAuth 클라이언트가 있고 토큰이 있는 경우 Review API 초기화
+    if oauth_client:
         try:
-            review_api = SimpleCafe24API(
-                mall_id=settings.cafe24_mall_id,
-                access_token=settings.cafe24_access_token,
-                refresh_token=settings.cafe24_refresh_token
-            )
+            token_status = oauth_client.get_token_status()
             
-            print(f"✅ 카페24 API 클라이언트 초기화 완료")
-            print(f"   - Mall ID: {settings.cafe24_mall_id}")
-            print(f"   - Access Token: {settings.cafe24_access_token[:20]}...")
-            
-            # API 연결 테스트
-            test_result = review_api.get_products(limit=1)
-            if test_result:
-                print("📝 카페24 API 연결 테스트 성공!")
+            if token_status['has_token']:
+                # Review API 클라이언트 초기화 (자동 갱신 기능 포함)
+                review_api = Cafe24ReviewAPI(oauth_client)
+                
+                print(f"✅ 카페24 Review API 클라이언트 초기화 완료")
+                print(f"   - Mall ID: {oauth_client.mall_id}")
+                print(f"   - 토큰 상태: {token_status['message']}")
+                
+                # API 연결 테스트
+                try:
+                    boards = review_api.get_review_boards()
+                    if boards:
+                        print(f"📝 카페24 API 연결 테스트 성공! 리뷰 게시판 {len(boards)}개 발견")
+                    else:
+                        print("📝 카페24 API 연결은 성공했지만 리뷰 게시판을 찾을 수 없습니다.")
+                except Exception as test_error:
+                    print(f"⚠️ 카페24 API 연결 테스트 실패: {test_error}")
+                    if "401" in str(test_error):
+                        print("   토큰이 만료되었을 수 있습니다. 다음 요청 시 자동으로 갱신됩니다.")
+                
             else:
-                print("⚠️  카페24 API 연결 테스트 실패 - 토큰이 만료되었을 수 있습니다.")
+                print(f"❌ 유효한 토큰이 없습니다: {token_status['message']}")
+                print("   OAuth 인증을 통해 토큰을 발급받아주세요.")
                 
         except Exception as e:
-            print(f"❌  클라이언트 초기화 실패: {e}")
+            print(f"❌ Review API 클라이언트 초기화 실패: {e}")
             import traceback
             traceback.print_exc()
     else:
-        missing = []
-        if not settings.cafe24_access_token:
-            missing.append("CAFE24_ACCESS_TOKEN")
-        if not settings.cafe24_mall_id:
-            missing.append("CAFE24_MALL_ID")
-        
-        print(f"❌  설정이 완료되지 않았습니다. 누락: {', '.join(missing)}")
-        print("   환경변수에 CAFE24_ACCESS_TOKEN과 CAFE24_MALL_ID를 설정해주세요.")
+        print(f"❌ OAuth 클라이언트가 초기화되지 않았습니다.")
+        print("   환경변수를 확인하고 OAuth 클라이언트를 먼저 초기화해주세요.")
 
 # 모니터링 관련 전역 변수
 monitoring_active = False
 monitoring_thread = None
-monitored_url = None
-known_reviews = set()  # 이미 확인한 리뷰들 저장 (URL 크롤링용)
+known_reviews = set()  # 이미 확인한 리뷰들 저장 (API용)
 pending_notifications = []  # 대기 중인 알림들
 DATA_FILE = 'known_reviews.json'
 
@@ -444,26 +491,18 @@ cached_reviews = []  # 최신 리뷰 10개 캐시
 def load_model():
     global sentiment_analyzer
     try:
-        # 한국어 감정 분석에 특화된 모델 사용
-        sentiment_analyzer = pipeline(
-            "sentiment-analysis",
-            model="nlptown/bert-base-multilingual-uncased-sentiment",
-            device=-1
-        )
-        print("다국어 감정 분석 모델 로드 완료")
+        # joblib로 저장된 scikit-learn 파이프라인 모델 로드
+        import joblib
+        model_path = 'lightweight_sentiment_model.pkl'
+        print(f"경량 감정 분석 모델 로드 시작: {model_path}")
+        
+        sentiment_analyzer = joblib.load(model_path)
+        print(f"경량 감정 분석 모델 로드 완료: {model_path}")
+        print(f"모델 타입: {type(sentiment_analyzer)}")
+        
     except Exception as e:
-        print(f"다국어 모델 로드 실패, 기본 모델 시도: {e}")
-        try:
-            # 백업으로 기본 모델 사용
-            sentiment_analyzer = pipeline(
-                "sentiment-analysis",
-                model="cardiffnlp/twitter-roberta-base-sentiment-latest",
-                device=-1
-            )
-            print("영어 감정 분석 모델 로드 완료")
-        except Exception as e2:
-            print(f"모든 모델 로드 실패: {e2}")
-            sentiment_analyzer = None
+        print(f"❌ 경량 모델 로드 실패: {e}")
+        sentiment_analyzer = None
 
 def load_known_reviews():
     """저장된 기존 리뷰 목록 로드"""
@@ -482,13 +521,12 @@ def load_known_reviews():
         known_reviews = set()
 
 def save_known_reviews():
-    """현재 리뷰 목록 저장 (URL 크롤링용)"""
+    """현재 리뷰 목록 저장 (API용)"""
     try:
         with open(DATA_FILE, 'w', encoding='utf-8') as f:
             json.dump({
                 'reviews': list(known_reviews),
-                'last_updated': datetime.now().isoformat(),
-                'monitored_url': monitored_url
+                'last_updated': datetime.now().isoformat()
             }, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"리뷰 저장 오류: {e}")
@@ -592,35 +630,82 @@ def analyze_review(review_text):
         if sentiment_analyzer is None:
             return {'is_negative': False, 'confidence': 0, 'error': '모델 로드 실패'}
         
-        result = sentiment_analyzer(review_text[:512])[0]
+        # scikit-learn 파이프라인 모델 사용
+        try:
+            # TfidfVectorizer + LogisticRegression 파이프라인인 경우
+            if hasattr(sentiment_analyzer, 'predict_proba') and hasattr(sentiment_analyzer, 'predict'):
+                
+                # 예측 수행
+                prediction = sentiment_analyzer.predict([review_text])
+                prediction_proba = sentiment_analyzer.predict_proba([review_text])
+                
+                predicted_class = prediction[0]
+                probabilities = prediction_proba[0]
+                
+                # 클래스 라벨 확인 (모델 학습 시 사용된 라벨)
+                classes = sentiment_analyzer.classes_ if hasattr(sentiment_analyzer, 'classes_') else ['negative', 'positive']
+                
+                print(f"🔍 모델 클래스: {classes}")
+                print(f"🔍 예측 결과: {predicted_class}")
+                print(f"🔍 확률: {probabilities}")
+                
+                # 알림 필요성 판단: negative와 neutral 모두 알림 대상
+                if predicted_class == 'negative':
+                    is_negative = True
+                    confidence = probabilities[list(classes).index('negative')] if 'negative' in classes else probabilities[0]
+                elif predicted_class == 'neutral':
+                    is_negative = True  # 보통 리뷰도 알림 대상
+                    confidence = probabilities[list(classes).index('neutral')] if 'neutral' in classes else probabilities[1]
+                elif predicted_class == 'positive':
+                    is_negative = False
+                    confidence = probabilities[list(classes).index('positive')] if 'positive' in classes else probabilities[2]
+                else:
+                    # 알 수 없는 라벨의 경우
+                    max_prob_idx = np.argmax(probabilities)
+                    confidence = probabilities[max_prob_idx]
+                    is_negative = max_prob_idx != list(classes).index('positive') if 'positive' in classes else True
+                
+                print(f"🔍 경량 모델 결과: 예측={predicted_class}, 신뢰도={confidence:.3f}")
+                
+            elif hasattr(sentiment_analyzer, 'predict'):
+                # predict만 있는 경우
+                prediction = sentiment_analyzer.predict([review_text])
+                predicted_class = prediction[0]
+                
+                is_negative = predicted_class == 'negative' or predicted_class == 'neutral'
+                confidence = 0.8  # 기본값
+                
+                print(f"🔍 경량 모델 결과 (predict only): 예측={predicted_class}")
+                
+            else:
+                # 지원하지 않는 모델 형태
+                return {'is_negative': False, 'confidence': 0, 'error': '지원하지 않는 모델 형태입니다'}
+                
+        except Exception as model_error:
+            print(f"모델 예측 오류: {model_error}")
+            import traceback
+            traceback.print_exc()
+            return {'is_negative': False, 'confidence': 0, 'error': f'모델 예측 실패: {str(model_error)}'}
         
-        print(f"🔍 모델 원본 결과: {result}")
-        
-        # nlptown 모델은 1 STAR, 2 STARS, 3 STARS, 4 STARS, 5 STARS 라벨 사용
-        label = result['label']
-        confidence = result['score']
-        
-        # 1-2성은 부정, 3성은 중성, 4-5성은 긍정으로 분류
-        if label in ['1 STAR', '2 STARS']:
-            is_negative = True
+        # 라벨 설정
+        if 'predicted_class' in locals() and predicted_class == 'negative':
             korean_label = '부정적'
-        elif label in ['4 STARS', '5 STARS']:
-            is_negative = False
+        elif 'predicted_class' in locals() and predicted_class == 'neutral':
+            korean_label = '보통'
+        elif 'predicted_class' in locals() and predicted_class == 'positive':
             korean_label = '긍정적'
-        else:  # 3 STARS
-            # 3성은 신뢰도에 따라 결정 (0.6 이상이면 중성, 미만이면 부정으로 처리)
-            is_negative = confidence < 0.6
-            korean_label = '부정적' if is_negative else '중성적'
+        else:
+            korean_label = '부정적' if is_negative else '긍정적'
         
-        print(f"🎯 최종 분류: {korean_label} (is_negative={is_negative})")
+        print(f"🎯 최종 분류: {korean_label} (is_negative={is_negative}, confidence={confidence:.3f})")
         
         return {
             'is_negative': is_negative,
             'confidence': confidence,
             'label': korean_label,
-            'score': round(confidence * 100, 2),
-            'original_label': label
+            'score': round(confidence * 100, 2)
         }
+        
     except Exception as e:
         print(f"❌ 리뷰 분석 오류: {e}")
         import traceback
@@ -678,187 +763,26 @@ def send_notification(new_reviews, negative_reviews):
     
     print("="*50 + "\n")
 
-def monitoring_loop():
-    """백그라운드에서 실행되는 모니터링 루프"""
-    global monitoring_active, known_reviews
-    
-    while monitoring_active:
-        try:
-            print(f"모니터링 확인 중... ({datetime.now().strftime('%H:%M:%S')})")
-            
-            # 새로운 리뷰 크롤링 (최근 1페이지만)
-            reviews = crawler.crawl_reviews(monitored_url)
-            
-            if not reviews:
-                print("크롤링된 리뷰가 없습니다.")
-                time.sleep(60)  # 1분 대기
-                continue
-            
-            # 신규 리뷰 찾기
-            new_reviews = []
-            for review in reviews:
-                review_key = review['text'].strip()
-                if review_key not in known_reviews:
-                    # 감정 분석
-                    analysis = analyze_review(review['text'])
-                    review.update(analysis)
-                    new_reviews.append(review)
-                    known_reviews.add(review_key)
-            
-            if new_reviews:
-                # 부정 리뷰만 필터링
-                negative_reviews = [r for r in new_reviews if r.get('is_negative', False)]
-                
-                # 알림 전송
-                send_notification(new_reviews, negative_reviews)
-                
-                # 데이터 저장
-                save_known_reviews()
-            else:
-                print("신규 리뷰가 없습니다.")
-            
-        except Exception as e:
-            print(f"모니터링 오류: {e}")
-        
-        # 1시간 대기 (3600초)
-        time.sleep(3600)
 
-def cafe24_monitoring_loop():
-    """카페24 API 기반 모니터링 루프 - 부정리뷰 탐지 중심"""
-    global monitoring_active, known_reviews
-    
-    while monitoring_active:
-        try:
-            print(f"카페24 API 모니터링 확인 중... ({datetime.now().strftime('%H:%M:%S')})")
-            
-            # 카페24 API로 최신 리뷰 가져오기
-            reviews = review_api.get_latest_reviews(limit=20)
-            
-            if not reviews:
-                print("카페24 API에서 가져온 리뷰가 없습니다.")
-                time.sleep(300)  # 5분 대기
-                continue
-            
-            # 신규 리뷰 찾기 (article_no 기준)
-            new_reviews = []
-            for review in reviews:
-                article_id = str(review.get('article_no', ''))
-                if article_id not in known_reviews:
-                    # 감정 분석 수행
-                    if review.get('content'):
-                        analyzed = analyzer.analyze_reviews_batch([{
-                            'text': review['content'],
-                            'title': review.get('title', ''),
-                            'writer': review.get('writer', ''),
-                            'product_no': review.get('product_no'),
-                            'article_no': review.get('article_no'),
-                            'created_date': review.get('created_date'),
-                            'rating': review.get('rating', 0)
-                        }])
-                        
-                        if analyzed:
-                            review.update(analyzed[0])  # 분석 결과 병합
-                            new_reviews.append(review)
-                            known_reviews.add(article_id)
-            
-            if new_reviews:
-                # 부정 리뷰만 필터링
-                negative_reviews = [r for r in new_reviews if r.get('is_negative', False)]
-                
-                print(f"신규 리뷰 {len(new_reviews)}개 발견, 부정리뷰 {len(negative_reviews)}개")
-                
-                # 부정 리뷰가 있으면 우선적으로 알림
-                if negative_reviews:
-                    notification_manager.add_monitoring_notification(
-                        'negative_found',
-                        f"🚨 부정리뷰 {len(negative_reviews)}개 발견! (총 신규 리뷰 {len(new_reviews)}개)",
-                        {
-                            'type': 'cafe24',
-                            'new_count': len(new_reviews),
-                            'negative_count': len(negative_reviews),
-                            'negative_reviews': [
-                                {
-                                    'content': r.get('content', ''),
-                                    'score': r.get('score', 0),
-                                    'product_no': r.get('product_no'),
-                                    'writer': r.get('writer', ''),
-                                    'created_date': r.get('created_date')
-                                }
-                                for r in negative_reviews[:3]  # 상위 3개만
-                            ]
-                        }
-                    )
-                else:
-                    # 부정 리뷰가 없어도 신규 리뷰 알림
-                    notification_manager.add_monitoring_notification(
-                        'new_reviews',
-                        f"📝 신규 리뷰 {len(new_reviews)}개 발견 (모두 긍정적)",
-                        {
-                            'type': 'cafe24',
-                            'new_count': len(new_reviews),
-                            'negative_count': 0
-                        }
-                    )
-                
-                # 데이터 저장
-                save_known_reviews()
-            else:
-                print("카페24 API에서 신규 리뷰가 없습니다.")
-            
-        except Exception as e:
-            print(f"카페24 모니터링 오류: {e}")
-            # API 오류 시 토큰 갱신 시도
-            if "401" in str(e) or "인증" in str(e):
-                print("토큰 갱신 시도 중...")
-                try:
-                    oauth_client.refresh_tokens_if_needed()
-                except:
-                    pass
-        
-        # 30분 대기 (카페24 API는 더 자주 체크)
-        time.sleep(1800)
+# 기존 모니터링 루프는 제거하고 웹훅 기반으로만 동작
 
 # ===== 카페24 OAuth 관련 엔드포인트 =====
-
-def init_oauth_client():
-    """OAuth 클라이언트 초기화 (settings 사용)"""
-    global oauth_client
-    
-    if settings.cafe24_client_id and settings.cafe24_client_secret and settings.cafe24_mall_id:
-        try:
-            oauth_client = Cafe24OAuth(
-                client_id=settings.cafe24_client_id,
-                client_secret=settings.cafe24_client_secret,
-                mall_id=settings.cafe24_mall_id,
-                redirect_uri=settings.redirect_uri
-            )
-            print(f"✅ OAuth 클라이언트 초기화 완료")
-            print(f"   - Mall ID: {settings.cafe24_mall_id}")
-            print(f"   - Client ID: {settings.cafe24_client_id}")
-            print(f"   - Redirect URI: {settings.redirect_uri}")
-            
-        except Exception as e:
-            print(f"❌ OAuth 클라이언트 초기화 실패: {e}")
-    else:
-        missing = []
-        if not settings.cafe24_client_id:
-            missing.append("CAFE24_CLIENT_ID")
-        if not settings.cafe24_client_secret:
-            missing.append("CAFE24_CLIENT_SECRET")
-        if not settings.cafe24_mall_id:
-            missing.append("CAFE24_MALL_ID")
-        
-        print(f"❌ OAuth 설정이 완료되지 않았습니다. 누락: {', '.join(missing)}")
 
 @app.route('/auth/setup', methods=['GET', 'POST'])
 def setup_auth():
     """카페24 API 설정"""
     if request.method == 'GET':
-        # 현재 설정 상태 반환
+        # 현재 설정 상태 반환 (디버그 정보 포함)
         return jsonify({
             'configured': bool(settings.cafe24_client_id and settings.cafe24_client_secret),
-            'mall_id': settings.cafe24_mall_id or '',
-            'redirect_uri': settings.redirect_uri
+            'mall_id': settings.cafe24_id,
+            'redirect_uri': settings.cafe24_redirect_uri,
+            'debug': {
+                'has_client_id': bool(settings.cafe24_client_id),
+                'has_client_secret': bool(settings.cafe24_client_secret),
+                'client_id_preview': settings.cafe24_client_id[:10] + '...' if settings.cafe24_client_id else None,
+                'oauth_client_initialized': bool(oauth_client)
+            }
         })
     
     if request.method == 'POST':
@@ -884,22 +808,26 @@ def start_auth():
     try:
         print(f"🚀 OAuth 인증 시작 요청")
         
-        # settings에서 직접 URL 생성
-        if not settings.cafe24_client_id or not settings.cafe24_mall_id:
-            return jsonify({'error': '카페24 설정이 완료되지 않았습니다.'}), 400
+        # OAuth 클라이언트 lazy 초기화
+        client = get_or_create_oauth_client()
+        if not client:
+            return jsonify({'error': 'OAuth 클라이언트가 초기화되지 않았습니다.'}), 400
         
-        # 직접 OAuth URL 생성
-        auth_url = f"https://{settings.cafe24_mall_id}.cafe24api.com/api/v2/oauth/authorize?" \
-                  f"response_type=code&" \
-                  f"client_id={settings.cafe24_client_id}&" \
-                  f"redirect_uri={settings.redirect_uri}&" \
-                  f"scope=mall.read_product,mall.read_category,mall.read_store,mall.read_community"
+        # OAuth 인증 URL 생성
+        auth_url, state = client.get_authorization_url(
+            scope="mall.read_product,mall.read_category,mall.read_store,mall.read_community"
+        )
+        
+        # 세션에 state 저장 (보안을 위해)
+        session['oauth_state'] = state
         
         print(f"✅ 인증 URL 생성 완료:")
         print(f"   - URL: {auth_url}")
+        print(f"   - State: {state}")
         
         return jsonify({
             'auth_url': auth_url,
+            'state': state,
             'message': '브라우저에서 인증 URL을 열어 인증을 진행해주세요.',
             'open_window': True  # 프론트엔드에서 새 창으로 열도록 지시
         })
@@ -969,28 +897,215 @@ def oauth_callback():
         
         if error:
             print(f"❌ OAuth 인증 오류: {error}")
-            return jsonify({'error': f'인증 오류: {error}'}), 400
+            error_descriptions = {
+                'access_denied': '사용자가 권한을 거부했습니다.',
+                'invalid_request': '잘못된 요청입니다.',
+                'server_error': '카페24 서버 오류가 발생했습니다.'
+            }
+            error_msg = error_descriptions.get(error, f'인증 오류: {error}')
+            
+            error_html = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>카페24 OAuth 인증 거부</title>
+                <style>
+                    body {{ font-family: Arial, sans-serif; text-align: center; padding: 50px; }}
+                    .error {{ color: #dc3545; font-size: 24px; margin-bottom: 20px; }}
+                    .message {{ color: #666; font-size: 16px; margin-bottom: 20px; }}
+                    .detail {{ background: #f8d7da; padding: 15px; border-radius: 5px; margin: 20px; text-align: left; }}
+                    .close-btn {{ background: #dc3545; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }}
+                </style>
+            </head>
+            <body>
+                <div class="error">❌ 카페24 OAuth 인증 거부</div>
+                <div class="message">OAuth 인증이 거부되었거나 오류가 발생했습니다.</div>
+                <div class="detail">
+                    <strong>오류 코드:</strong> {error}<br>
+                    <strong>상세 내용:</strong> {error_msg}
+                </div>
+                <button class="close-btn" onclick="window.close()">창 닫기</button>
+                <script>
+                    setTimeout(() => {{
+                        window.close();
+                    }}, 5000);
+                </script>
+            </body>
+            </html>
+            """
+            return error_html
         
         if not code:
             print(f"❌ 인증 코드가 없습니다.")
-            return jsonify({'error': '인증 코드가 없습니다.'}), 400
+            
+            error_html = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>카페24 OAuth 인증 실패</title>
+                <style>
+                    body {{ font-family: Arial, sans-serif; text-align: center; padding: 50px; }}
+                    .error {{ color: #dc3545; font-size: 24px; margin-bottom: 20px; }}
+                    .message {{ color: #666; font-size: 16px; margin-bottom: 20px; }}
+                    .detail {{ background: #f8d7da; padding: 15px; border-radius: 5px; margin: 20px; text-align: left; }}
+                    .close-btn {{ background: #dc3545; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }}
+                </style>
+            </head>
+            <body>
+                <div class="error">❌ 카페24 OAuth 인증 실패</div>
+                <div class="message">OAuth 인증 과정에서 문제가 발생했습니다.</div>
+                <div class="detail">
+                    <strong>오류 내용:</strong><br>
+                    인증 코드가 전달되지 않았습니다. 다시 시도해주세요.
+                </div>
+                <button class="close-btn" onclick="window.close()">창 닫기</button>
+                <script>
+                    setTimeout(() => {{
+                        window.close();
+                    }}, 5000);
+                </script>
+            </body>
+            </html>
+            """
+            return error_html
         
-        # state 검증 (개발 중에는 건너뛰기)
-        # if state != session.get('oauth_state'):
-        #     return jsonify({'error': '인증 상태가 유효하지 않습니다.'}), 400
+        # state 검증
+        if state != session.get('oauth_state'):
+            print(f"❌ State 불일치: 받은={state}, 저장된={session.get('oauth_state')}")
+            
+            error_html = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>카페24 OAuth 보안 오류</title>
+                <style>
+                    body {{ font-family: Arial, sans-serif; text-align: center; padding: 50px; }}
+                    .error {{ color: #dc3545; font-size: 24px; margin-bottom: 20px; }}
+                    .message {{ color: #666; font-size: 16px; margin-bottom: 20px; }}
+                    .detail {{ background: #f8d7da; padding: 15px; border-radius: 5px; margin: 20px; text-align: left; }}
+                    .close-btn {{ background: #dc3545; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }}
+                    .security {{ color: #721c24; font-weight: bold; }}
+                </style>
+            </head>
+            <body>
+                <div class="error">❌ 카페24 OAuth 보안 오류</div>
+                <div class="message">보안 검증에 실패했습니다.</div>
+                <div class="detail">
+                    <div class="security">⚠️ CSRF 공격 의심</div><br>
+                    <strong>오류 내용:</strong><br>
+                    인증 상태가 유효하지 않습니다. 세션이 변조되었거나 CSRF 공격일 가능성이 있습니다.<br><br>
+                    <strong>받은 State:</strong> {state}<br>
+                    <strong>예상 State:</strong> {session.get('oauth_state')}
+                </div>
+                <button class="close-btn" onclick="window.close()">창 닫기</button>
+                <script>
+                    setTimeout(() => {{
+                        window.close();
+                    }}, 5000);
+                </script>
+            </body>
+            </html>
+            """
+            return error_html
         
-        if not oauth_client:
+        # OAuth 클라이언트 lazy 초기화 
+        client = get_or_create_oauth_client()
+        if not client:
             print(f"❌ OAuth 클라이언트가 없습니다.")
-            return jsonify({'error': 'OAuth 클라이언트가 초기화되지 않았습니다.'}), 400
+            
+            error_html = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>카페24 OAuth 설정 오류</title>
+                <style>
+                    body {{ font-family: Arial, sans-serif; text-align: center; padding: 50px; }}
+                    .error {{ color: #dc3545; font-size: 24px; margin-bottom: 20px; }}
+                    .message {{ color: #666; font-size: 16px; margin-bottom: 20px; }}
+                    .detail {{ background: #f8d7da; padding: 15px; border-radius: 5px; margin: 20px; text-align: left; }}
+                    .close-btn {{ background: #dc3545; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }}
+                    .config {{ color: #856404; font-weight: bold; }}
+                </style>
+            </head>
+            <body>
+                <div class="error">❌ 카페24 OAuth 설정 오류</div>
+                <div class="message">OAuth 클라이언트 초기화에 실패했습니다.</div>
+                <div class="detail">
+                    <div class="config">🔧 설정 확인 필요</div><br>
+                    <strong>오류 내용:</strong><br>
+                    OAuth 클라이언트가 초기화되지 않았습니다.<br><br>
+                    <strong>확인 사항:</strong><br>
+                    • .env 파일의 CAFE24_CLIENT_ID 설정<br>
+                    • .env 파일의 CAFE24_CLIENT_SECRET 설정<br>
+                    • .env 파일의 CAFE24_REDIRECT_URI 설정<br>
+                    • 서버 재시작 필요 여부
+                </div>
+                <button class="close-btn" onclick="window.close()">창 닫기</button>
+                <script>
+                    setTimeout(() => {{
+                        window.close();
+                    }}, 5000);
+                </script>
+            </body>
+            </html>
+            """
+            return error_html
         
         print(f"🔐 액세스 토큰 발급 중...")
+        
         # 액세스 토큰 발급
-        token_data = oauth_client.get_access_token(code)
-        print(f"✅ 토큰 발급 완료: {token_data}")
+        try:
+            token_data = client.get_access_token(code)
+            if not token_data or not token_data.get('access_token'):
+                raise Exception("토큰 발급 실패: 토큰 데이터가 없습니다.")
+            print(f"✅ 토큰 발급 완료: {token_data}")
+            
+        except Exception as token_error:
+            print(f"❌ 토큰 발급 실패: {token_error}")
+            
+            error_html = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>카페24 토큰 발급 오류</title>
+                <style>
+                    body {{ font-family: Arial, sans-serif; text-align: center; padding: 50px; }}
+                    .error {{ color: #dc3545; font-size: 24px; margin-bottom: 20px; }}
+                    .message {{ color: #666; font-size: 16px; margin-bottom: 20px; }}
+                    .detail {{ background: #f8d7da; padding: 15px; border-radius: 5px; margin: 20px; text-align: left; }}
+                    .close-btn {{ background: #dc3545; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }}
+                    .token {{ color: #721c24; font-weight: bold; }}
+                </style>
+            </head>
+            <body>
+                <div class="error">❌ 카페24 토큰 발급 오류</div>
+                <div class="message">액세스 토큰 발급에 실패했습니다.</div>
+                <div class="detail">
+                    <div class="token">🔑 토큰 발급 실패</div><br>
+                    <strong>오류 내용:</strong><br>
+                    {str(token_error)}<br><br>
+                    <strong>가능한 원인:</strong><br>
+                    • 만료된 인증 코드<br>
+                    • 잘못된 카페24 API 설정<br>
+                    • 네트워크 연결 문제<br>
+                    • 카페24 서버 오류<br><br>
+                    <strong>해결 방법:</strong><br>
+                    다시 인증을 시도해주세요.
+                </div>
+                <button class="close-btn" onclick="window.close()">창 닫기</button>
+                <script>
+                    setTimeout(() => {{
+                        window.close();
+                    }}, 5000);
+                </script>
+            </body>
+            </html>
+            """
+            return error_html
         
         # Review API 클라이언트 초기화
         global review_api
-        review_api = Cafe24ReviewAPI(oauth_client)
+        review_api = Cafe24ReviewAPI(client)
         print(f"📝 Review API 클라이언트 초기화 완료")
         
         # 세션 정리
@@ -1003,17 +1118,266 @@ def oauth_callback():
         
         print(f"🎉 OAuth 인증 성공!")
         
-        return jsonify({
-            'message': '카페24 OAuth 인증이 완료되었습니다.',
-            'token_expires_at': token_data.get('expires_at'),
-            'scopes': token_data.get('scopes', [])
-        })
+        # 성공 페이지 반환
+        success_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>카페24 OAuth 인증 완료</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; text-align: center; padding: 50px; }}
+                .success {{ color: #28a745; font-size: 24px; margin-bottom: 20px; }}
+                .message {{ color: #666; font-size: 16px; margin-bottom: 20px; }}
+                .detail {{ background: #d4edda; padding: 15px; border-radius: 5px; margin: 20px; }}
+                .close-btn {{ background: #28a745; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }}
+            </style>
+        </head>
+        <body>
+            <div class="success">✅ 카페24 OAuth 인증 완료!</div>
+            <div class="message">API 접근 권한이 성공적으로 설정되었습니다.</div>
+            <div class="detail">
+                <strong>권한 범위:</strong> {', '.join(token_data.get('scopes', []))}<br>
+                <strong>토큰 만료:</strong> {token_data.get('expires_at', 'Unknown')}
+            </div>
+            <button class="close-btn" onclick="window.close()">창 닫기</button>
+            <script>
+                setTimeout(() => {{
+                    window.close();
+                }}, 3000);
+            </script>
+        </body>
+        </html>
+        """
+        return success_html
         
     except Exception as e:
         print(f"❌ OAuth 콜백 처리 실패: {e}")
         import traceback
         traceback.print_exc()
+        
+        # 예외 발생 시 에러 페이지
+        error_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>카페24 OAuth 오류</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; text-align: center; padding: 50px; }}
+                .error {{ color: #dc3545; font-size: 24px; margin-bottom: 20px; }}
+                .message {{ color: #666; font-size: 16px; margin-bottom: 20px; }}
+                .detail {{ background: #f8d7da; padding: 15px; border-radius: 5px; margin: 20px; text-align: left; }}
+                .close-btn {{ background: #dc3545; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }}
+            </style>
+        </head>
+        <body>
+            <div class="error">❌ 카페24 OAuth 처리 중 오류 발생</div>
+            <div class="message">시스템 오류가 발생했습니다.</div>
+            <div class="detail">
+                <strong>오류 내용:</strong><br>
+                {str(e)}
+            </div>
+            <button class="close-btn" onclick="window.close()">창 닫기</button>
+            <script>
+                setTimeout(() => {{
+                    window.close();
+                }}, 10000);
+            </script>
+        </body>
+        </html>
+        """
+        return error_html
+
+# 카카오톡 알림 관련 엔드포인트
+@app.route('/auth/kakao/start')
+def start_kakao_auth():
+    """카카오톡 인증 시작"""
+    try:
+        auth_url = notification_manager.get_kakao_auth_url()
+        if not auth_url:
+            return jsonify({'error': '카카오 API 키가 설정되지 않았습니다.'}), 400
+            
+        return jsonify({
+            'auth_url': auth_url,
+            'message': '카카오톡 인증을 위해 브라우저에서 URL을 열어주세요.'
+        })
+        
+    except Exception as e:
+        print(f"❌ 카카오톡 인증 시작 실패: {e}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/auth/kakao/callback')
+def kakao_callback():
+    """카카오톡 OAuth 콜백 처리"""
+    try:
+        code = request.args.get('code')
+        error = request.args.get('error')
+        
+        if error:
+            print(f"❌ 카카오톡 인증 오류: {error}")
+            return jsonify({'error': f'카카오톡 인증 오류: {error}'}), 400
+            
+        if not code:
+            return jsonify({'error': '인증 코드가 없습니다.'}), 400
+            
+        # 액세스 토큰 발급
+        access_token = notification_manager.get_kakao_access_token(code)
+        
+        if access_token:
+            # 토큰 정보 확인 (디버깅용)
+            has_refresh = hasattr(notification_manager, 'kakao_refresh_token') and notification_manager.kakao_refresh_token
+            
+            # 테스트 메시지 전송
+            test_message = "🎉 카카오톡 알림 설정이 완료되었습니다!\n부정 리뷰 발견 시 이곳으로 알림이 전송됩니다."
+            notification_manager.send_kakao_message(test_message)
+            
+            # 팝업 창 자동 닫기를 위한 HTML 응답 (토큰 정보 포함)
+            html_response = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>카카오톡 인증 완료</title>
+                <style>
+                    body {{ font-family: Arial, sans-serif; text-align: center; padding: 50px; }}
+                    .success {{ color: #28a745; font-size: 24px; margin-bottom: 20px; }}
+                    .message {{ color: #666; font-size: 16px; margin-bottom: 20px; }}
+                    .debug {{ background: #f8f9fa; padding: 15px; margin: 20px; border-radius: 5px; font-size: 14px; text-align: left; }}
+                </style>
+            </head>
+            <body>
+                <div class="success">✅ 카카오톡 인증 완료!</div>
+                <div class="message">카카오톡으로 테스트 메시지가 전송되었습니다.<br>이 창은 자동으로 닫힙니다.</div>
+                <div class="debug">
+                    <strong>토큰 정보:</strong><br>
+                    액세스 토큰: {access_token[:10]}...<br>
+                    리프레시 토큰: {'있음' if has_refresh else '없음'}<br>
+                    저장 상태: 메모리에 저장됨
+                </div>
+                <script>
+                    setTimeout(() => {{
+                        window.close();
+                    }}, 5000);
+                </script>
+            </body>
+            </html>
+            """
+            return html_response
+        else:
+            # 토큰 발급 실패 시 에러 페이지
+            error_html = """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>카카오톡 인증 실패</title>
+                <style>
+                    body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+                    .error { color: #dc3545; font-size: 24px; margin-bottom: 20px; }
+                    .message { color: #666; font-size: 16px; margin-bottom: 30px; }
+                    .retry-btn { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }
+                </style>
+            </head>
+            <body>
+                <div class="error">❌ 카카오톡 인증 실패</div>
+                <div class="message">액세스 토큰 발급에 실패했습니다.<br>잠시 후 다시 시도해주세요.</div>
+                <button class="retry-btn" onclick="window.close()">창 닫기</button>
+            </body>
+            </html>
+            """
+            return error_html
+            
+    except Exception as e:
+        print(f"❌ 카카오톡 콜백 처리 실패: {e}")
+        
+        # 예외 발생 시 에러 페이지
+        error_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>카카오톡 인증 오류</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; text-align: center; padding: 50px; }}
+                .error {{ color: #dc3545; font-size: 24px; margin-bottom: 20px; }}
+                .message {{ color: #666; font-size: 16px; margin-bottom: 20px; }}
+                .detail {{ background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px; text-align: left; }}
+                .retry-btn {{ background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }}
+            </style>
+        </head>
+        <body>
+            <div class="error">❌ 카카오톡 인증 중 오류 발생</div>
+            <div class="message">시스템 오류가 발생했습니다.</div>
+            <div class="detail">
+                <strong>오류 내용:</strong><br>
+                {str(e)}
+            </div>
+            <button class="retry-btn" onclick="window.close()">창 닫기</button>
+            <script>
+                setTimeout(() => {{
+                    window.close();
+                }}, 10000);
+            </script>
+        </body>
+        </html>
+        """
+        return error_html
+
+@app.route('/auth/kakao/status')
+def kakao_auth_status():
+    """카카오톡 인증 상태 확인"""
+    try:
+        # 카카오 API 키가 설정되어 있고 액세스 토큰이 있으면 인증 완료
+        api_key_configured = bool(notification_manager.kakao_api_key)
+        access_token_available = notification_manager.kakao_access_token is not None
+        
+        authenticated = api_key_configured and access_token_available
+        
+        print(f"🔍 카카오톡 상태 확인:")
+        print(f"   API 키: {'설정됨' if api_key_configured else '미설정'} ({notification_manager.kakao_api_key[:10] if notification_manager.kakao_api_key else 'None'}...)")
+        print(f"   액세스 토큰: {'있음' if access_token_available else '없음'}")
+        print(f"   인증 상태: {'완료' if authenticated else '미완료'}")
+        
+        return jsonify({
+            'authenticated': authenticated,
+            'api_key_configured': api_key_configured,
+            'access_token_available': access_token_available,
+            'message': '카카오톡 인증 완료' if authenticated else '카카오톡 인증 필요'
+        })
+        
+    except Exception as e:
+        print(f"❌ 카카오톡 인증 상태 확인 실패: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/test/kakao-notification', methods=['POST'])
+def test_kakao_notification():
+    """카카오톡 알림 테스트"""
+    try:
+        data = request.json or {}
+        message = data.get('message', '카카오톡 알림 테스트 메시지입니다! 🎉')
+        
+        print(f"🔍 카카오톡 테스트 메시지 전송 시도: {message[:50]}...")
+        print(f"🔍 액세스 토큰 상태: {'있음' if notification_manager.kakao_access_token else '없음'}")
+        print(f"🔍 API 키 상태: {'있음' if notification_manager.kakao_api_key else '없음'}")
+        
+        # 액세스 토큰이 없으면 구체적인 오류 메시지 반환
+        if not notification_manager.kakao_access_token:
+            print("❌ 카카오톡 액세스 토큰이 없습니다.")
+            return jsonify({'error': '카카오톡 인증이 필요합니다. 먼저 카카오톡 연동을 완료해주세요.'}), 400
+        
+        success = notification_manager.send_kakao_message(message)
+        
+        if success:
+            print("✅ 카카오톡 테스트 메시지 전송 성공")
+            return jsonify({
+                'message': '카카오톡 테스트 메시지가 전송되었습니다.',
+                'success': True
+            })
+        else:
+            print("❌ 카카오톡 메시지 전송 실패 - send_kakao_message returned False")
+            return jsonify({'error': '카카오톡 메시지 전송에 실패했습니다. 토큰이 만료되었거나 API 오류가 발생했습니다.'}), 400
+            
+    except Exception as e:
+        print(f"❌ 카카오톡 테스트 메시지 전송 예외 발생: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'서버 오류: {str(e)}'}), 500
 
 @app.route('/auth/status')
 def auth_status():
@@ -1120,13 +1484,10 @@ def revoke_token():
 # ===== 카페24 API 리뷰 관련 엔드포인트 =====
 
 @app.route('/api/reviews/boards')
-@login_required
+@full_auth_required
 def get_review_boards():
     """리뷰 게시판 목록 조회"""
     try:
-        if not review_api:
-            return jsonify({'error': '카페24 API 인증이 필요합니다.'}), 401
-        
         boards = review_api.get_review_boards()
         
         return jsonify({
@@ -1138,13 +1499,10 @@ def get_review_boards():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/reviews/latest')
-@login_required
+@full_auth_required
 def get_latest_reviews():
     """최신 리뷰 조회"""
     try:
-        if not review_api:
-            return jsonify({'error': '카페24 API 인증이 필요합니다.'}), 401
-        
         days = request.args.get('days', 7, type=int)
         limit = request.args.get('limit', 50, type=int)
         
@@ -1152,11 +1510,11 @@ def get_latest_reviews():
         
         # 감정 분석 수행
         if reviews:
-            analyzed_reviews = analyzer.analyze_reviews_batch(reviews)
+            analyzed_reviews = analyze_reviews_batch(reviews)
             # 상품명 추가
             enriched_reviews = enrich_reviews_with_product_names(analyzed_reviews)
-            statistics = analyzer.get_review_statistics(enriched_reviews)
-            negative_reviews = analyzer.get_negative_reviews(enriched_reviews)
+            statistics = get_review_statistics(enriched_reviews)
+            negative_reviews = get_negative_reviews(enriched_reviews)
             
             return jsonify({
                 'reviews': enriched_reviews,
@@ -1167,7 +1525,7 @@ def get_latest_reviews():
         else:
             return jsonify({
                 'reviews': [],
-                'statistics': analyzer.get_review_statistics([]),
+                'statistics': get_review_statistics([]),
                 'negative_reviews': [],
                 'count': 0
             })
@@ -1176,23 +1534,20 @@ def get_latest_reviews():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/reviews/product/<int:product_no>')
-@login_required
+@full_auth_required
 def get_product_reviews(product_no):
     """특정 상품의 리뷰 조회"""
     try:
-        if not review_api:
-            return jsonify({'error': '카페24 API 인증이 필요합니다.'}), 401
-        
         limit = request.args.get('limit', 100, type=int)
         
         reviews = review_api.get_product_reviews(product_no=product_no, limit=limit)
         
         if reviews:
-            analyzed_reviews = analyzer.analyze_reviews_batch(reviews)
+            analyzed_reviews = analyze_reviews_batch(reviews)
             # 상품명 추가
             enriched_reviews = enrich_reviews_with_product_names(analyzed_reviews)
-            statistics = analyzer.get_review_statistics(enriched_reviews)
-            negative_reviews = analyzer.get_negative_reviews(enriched_reviews)
+            statistics = get_review_statistics(enriched_reviews)
+            negative_reviews = get_negative_reviews(enriched_reviews)
             
             return jsonify({
                 'product_no': product_no,
@@ -1205,7 +1560,7 @@ def get_product_reviews(product_no):
             return jsonify({
                 'product_no': product_no,
                 'reviews': [],
-                'statistics': analyzer.get_review_statistics([]),
+                'statistics': get_review_statistics([]),
                 'negative_reviews': [],
                 'count': 0,
                 'message': '해당 상품의 리뷰를 찾을 수 없습니다.'
@@ -1215,13 +1570,10 @@ def get_product_reviews(product_no):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/reviews/search')
-@login_required
+@full_auth_required
 def search_reviews():
     """리뷰 검색"""
     try:
-        if not review_api:
-            return jsonify({'error': '카페24 API 인증이 필요합니다.'}), 401
-        
         keyword = request.args.get('keyword', '').strip()
         limit = request.args.get('limit', 50, type=int)
         
@@ -1231,11 +1583,11 @@ def search_reviews():
         reviews = review_api.search_reviews(keyword=keyword, limit=limit)
         
         if reviews:
-            analyzed_reviews = analyzer.analyze_reviews_batch(reviews)
+            analyzed_reviews = analyze_reviews_batch(reviews)
             # 상품명 추가
             enriched_reviews = enrich_reviews_with_product_names(analyzed_reviews)
-            statistics = analyzer.get_review_statistics(enriched_reviews)
-            negative_reviews = analyzer.get_negative_reviews(enriched_reviews)
+            statistics = get_review_statistics(enriched_reviews)
+            negative_reviews = get_negative_reviews(enriched_reviews)
             
             return jsonify({
                 'keyword': keyword,
@@ -1248,7 +1600,7 @@ def search_reviews():
             return jsonify({
                 'keyword': keyword,
                 'reviews': [],
-                'statistics': analyzer.get_review_statistics([]),
+                'statistics': get_review_statistics([]),
                 'negative_reviews': [],
                 'count': 0,
                 'message': f"'{keyword}'에 대한 리뷰를 찾을 수 없습니다."
@@ -1258,13 +1610,10 @@ def search_reviews():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/products')
-@login_required
+@full_auth_required
 def get_products():
     """상품 목록 조회"""
     try:
-        if not review_api:
-            return jsonify({'error': '카페24 API 인증이 필요합니다.'}), 401
-        
         limit = request.args.get('limit', 100, type=int)
         
         products = review_api.get_products(limit=limit)
@@ -1295,8 +1644,7 @@ def login():
             session['user'] = {
                 'id': 'admin',
                 'username': username,
-                'name': 'Administrator',
-                'email': 'admin@example.com',
+                'name': 'Cilantro',
                 'picture': None
             }
             
@@ -1451,181 +1799,41 @@ def webhook_status():
 def index():
     return render_template('index.html')
 
-@app.route('/crawl_and_analyze', methods=['POST'])
-@login_required
-def crawl_and_analyze():
-    """URL에서 리뷰를 크롤링하고 분석"""
-    try:
-        data = request.json
-        url = data.get('url', '')
-        
-        if not url:
-            return jsonify({'error': 'URL을 입력해주세요.'}), 400
-        
-        # 제품 정보 추출
-        product_info = crawler.extract_product_info(url)
-        
-        # 리뷰 크롤링
-        reviews = crawler.crawl_reviews(url)
-        
-        if not reviews:
-            return jsonify({'error': '리뷰를 찾을 수 없습니다.'}), 404
-        
-        # 리뷰 분석 (analyzer 사용)
-        analyzed_reviews = analyzer.analyze_reviews_batch(reviews)
-        
-        # 통계 계산
-        statistics = analyzer.get_review_statistics(analyzed_reviews)
-        negative_reviews = analyzer.get_negative_reviews(analyzed_reviews)
-        positive_reviews = [r for r in analyzed_reviews if not r.get('is_negative', False)]
-        
-        response = {
-            'product': product_info,
-            'reviews': analyzed_reviews,
-            'summary': statistics,
-            'top_negative': negative_reviews[:5],  # 상위 5개 부정 리뷰
-            'top_positive': positive_reviews[:5]   # 상위 5개 긍정 리뷰
-        }
-        
-        return jsonify(response)
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
-@app.route('/start_monitoring', methods=['POST'])
-@login_required
-def start_monitoring():
-    """모니터링 시작 (URL 기반)"""
-    global monitoring_active, monitoring_thread, monitored_url
-    
-    try:
-        data = request.json
-        url = data.get('url', '')
-        
-        if not url:
-            return jsonify({'error': 'URL을 입력해주세요.'}), 400
-        
-        if monitoring_active:
-            return jsonify({'error': '이미 모니터링이 실행 중입니다.'}), 400
-        
-        # 모니터링 설정
-        monitored_url = url
-        monitoring_active = True
-        
-        # 기존 리뷰 데이터 로드
-        load_known_reviews()
-        
-        # 초기 리뷰 수집 (기존 리뷰 등록)
-        print("초기 리뷰 수집 중...")
-        initial_reviews = crawler.crawl_reviews(url)
-        for review in initial_reviews:
-            known_reviews.add(review['text'].strip())
-        
-        save_known_reviews()
-        print(f"초기 리뷰 {len(initial_reviews)}개 등록 완료")
-        
-        # 모니터링 스레드 시작
-        monitoring_thread = threading.Thread(target=monitoring_loop, daemon=True)
-        monitoring_thread.start()
-        
-        # 알림 추가
-        notification_manager.add_monitoring_notification(
-            'started', 
-            f"URL 모니터링이 시작되었습니다: {url}",
-            {'url': url, 'initial_reviews': len(initial_reviews)}
-        )
-        
-        return jsonify({
-            'message': '모니터링이 시작되었습니다.',
-            'url': url,
-            'initial_reviews': len(initial_reviews)
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
-@app.route('/start_cafe24_monitoring', methods=['POST'])
+@app.route('/webhook/init', methods=['POST'])
 @login_required
-def start_cafe24_monitoring():
-    """카페24 API 기반 모니터링 시작"""
-    global monitoring_active, monitoring_thread, monitored_url
+def init_webhook_system():
+    """웹훅 기반 시스템 초기화"""
+    global monitoring_active
     
     try:
         if not review_api:
             return jsonify({'error': '카페24 API 인증이 필요합니다.'}), 401
         
-        if monitoring_active:
-            return jsonify({'error': '이미 모니터링이 실행 중입니다.'}), 400
-        
-        # 카페24 API 기반 모니터링 설정
-        monitored_url = "CAFE24_API"  # API 기반 모니터링 표시
+        # 웹훅 시스템 활성화
         monitoring_active = True
         
         # 기존 리뷰 데이터 로드
         load_known_reviews()
         
-        # 초기 리뷰 수집 (카페24 API로)
-        print("카페24 API에서 초기 리뷰 수집 중...")
-        initial_reviews = review_api.get_latest_reviews(limit=50)
-        
-        # 기존 리뷰 ID 저장 (API 기반이므로 article_no 사용)
-        for review in initial_reviews:
-            known_reviews.add(str(review.get('article_no', '')))
-        
-        save_known_reviews()
-        print(f"초기 리뷰 {len(initial_reviews)}개 등록 완료")
-        
-        # 모니터링 스레드 시작 (카페24 API 기반)
-        monitoring_thread = threading.Thread(target=cafe24_monitoring_loop, daemon=True)
-        monitoring_thread.start()
+        # 리뷰 캐시 초기화
+        if not cached_reviews:
+            print("리뷰 캐시 초기화 중...")
+            initialize_review_cache()
         
         # 알림 추가
         notification_manager.add_monitoring_notification(
-            'started', 
-            f"카페24 API 모니터링이 시작되었습니다",
-            {'type': 'cafe24', 'initial_reviews': len(initial_reviews)}
+            'webhook_ready', 
+            "웹훅 기반 리뷰 모니터링 시스템이 준비되었습니다",
+            {'type': 'webhook_system', 'cached_reviews': len(cached_reviews)}
         )
         
         return jsonify({
-            'message': '카페24 API 기반 모니터링이 시작되었습니다.',
-            'type': 'cafe24',
-            'initial_reviews': len(initial_reviews)
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-        
-        # 모니터링 설정
-        monitored_url = url
-        monitoring_active = True
-        
-        # 기존 리뷰 데이터 로드
-        load_known_reviews()
-        
-        # 초기 리뷰 수집 (기존 리뷰 등록)
-        print("초기 리뷰 수집 중...")
-        initial_reviews = crawler.crawl_reviews(url)
-        for review in initial_reviews:
-            known_reviews.add(review['text'].strip())
-        
-        save_known_reviews()
-        print(f"초기 리뷰 {len(initial_reviews)}개 등록 완료")
-        
-        # 모니터링 스레드 시작
-        monitoring_thread = threading.Thread(target=monitoring_loop, daemon=True)
-        monitoring_thread.start()
-        
-        # 알림 추가
-        notification_manager.add_monitoring_notification(
-            'started', 
-            f"URL 모니터링이 시작되었습니다: {url}",
-            {'url': url, 'initial_reviews': len(initial_reviews)}
-        )
-        
-        return jsonify({
-            'message': '모니터링이 시작되었습니다.',
-            'url': url,
-            'initial_reviews': len(initial_reviews)
+            'message': '웹훅 기반 리뷰 모니터링 시스템이 준비되었습니다.',
+            'type': 'webhook',
+            'cached_reviews': len(cached_reviews),
+            'webhook_enabled': True
         })
         
     except Exception as e:
@@ -1660,8 +1868,11 @@ def monitoring_status():
     """모니터링 상태 확인"""
     return jsonify({
         'active': monitoring_active,
-        'url': monitored_url,
-        'known_reviews_count': len(known_reviews)
+        'type': 'webhook_based',
+        'known_reviews_count': len(known_reviews),
+        'cached_reviews_count': len(cached_reviews),
+        'webhook_enabled': WEBHOOK_ENABLED,
+        'webhook_event_key_configured': bool(settings.WEBHOOK_EVENT_KEY)
     })
 
 @app.route('/get_notifications')
@@ -1715,11 +1926,26 @@ def get_config():
     """현재 설정 조회"""
     try:
         return jsonify({
-            'cafe24': config.get_cafe24_config(),
-            'analysis': config.get_analysis_config(),
-            'monitoring': config.get_monitoring_config(),
-            'app': config.get_app_config(),
-            'configured': config.is_cafe24_configured()
+            'cafe24': {
+                'client_id': settings.cafe24_client_id,
+                'mall_id': settings.cafe24_id,
+                'redirect_uri': settings.cafe24_redirect_uri,
+                'configured': bool(settings.cafe24_client_id and settings.cafe24_client_secret)
+            },
+            'monitoring': {
+                'check_interval': settings.check_interval,
+                'max_reviews_per_check': settings.max_reviews_per_check,
+                'notification_enabled': settings.notification_enabled
+            },
+            'app': {
+                'debug': settings.debug,
+                'port': settings.port,
+                'host': settings.host
+            },
+            'webhook': {
+                'enabled': WEBHOOK_ENABLED,
+                'event_key_configured': bool(settings.WEBHOOK_EVENT_KEY)
+            }
         })
         
     except Exception as e:
@@ -1728,22 +1954,50 @@ def get_config():
 if __name__ == '__main__':
     print("서버 시작 중...")
     
-    # 감정 분석 모델 로드
-    load_model()
+    # 메모리 절약을 위해 모델을 즉시 로드하지 않음 (lazy loading)
+    print("감정 분석 모델은 첫 번째 요청 시 로드됩니다.")
     
-    # 설정 상태 출력
+    # 설정 상태 출력 및 검증
     print("=== 설정 상태 ===")
-    print(f"카페24 Mall ID: {settings.cafe24_mall_id}")
-    print(f"카페24 Access Token: {'설정됨' if settings.cafe24_access_token else '미설정'}")
-    print(f"카페24 Refresh Token: {'설정됨' if settings.cafe24_refresh_token else '미설정'}")
+    
+    # 필수 설정 검증
+    required_settings = []
+    
+    if not settings.cafe24_client_id:
+        required_settings.append("CAFE24_CLIENT_ID")
+    if not settings.cafe24_client_secret:
+        required_settings.append("CAFE24_CLIENT_SECRET")  
+    if not settings.cafe24_id:
+        required_settings.append("CAFE24_ID")
+    if not settings.cafe24_password:
+        required_settings.append("CAFE24_PASSWORD")
+    if not settings.cafe24_redirect_uri:
+        required_settings.append("CAFE24_REDIRECT_URI")
+    if not settings.WEBHOOK_EVENT_KEY:
+        required_settings.append("WEBHOOK_EVENT_KEY")
+    if not settings.SERVICE_KEY:
+        required_settings.append("SERVICE_KEY")
+        
+    if required_settings:
+        print("❌ 필수 환경변수가 설정되지 않았습니다:")
+        for setting in required_settings:
+            print(f"   - {setting}")
+        print("\n환경변수를 설정한 후 서버를 재시작해주세요.")
+        print("예: export CAFE24_CLIENT_ID=your_client_id")
+    else:
+        print("✅ 모든 필수 환경변수가 설정되었습니다.")
+    
+    print(f"카페24 Mall ID (cafe24_id): {settings.cafe24_id}")
+    print(f"카페24 Client ID: {settings.cafe24_client_id}")
+    print(f"카페24 Redirect URI: {settings.cafe24_redirect_uri}")
     print(f"웹훅 이벤트 키: {'설정됨' if settings.WEBHOOK_EVENT_KEY else '미설정'}")
     print(f"서비스 키: {'설정됨' if settings.SERVICE_KEY else '미설정'}")
-    print()
+    
     
     # 카페24 OAuth 클라이언트 초기화
     init_oauth_client()
     
-    # 카페24 API 클라이언트 초기화 (직접 토큰 사용)
+    # 카페24 Review API 클라이언트 초기화
     init_cafe24_client()
     
     # 리뷰 캐시 시스템 초기화
@@ -1759,9 +2013,13 @@ if __name__ == '__main__':
             print(f"기존 캐시 {len(cached_reviews)}개를 사용합니다.")
     print()
     
-    # 앱 실행 (AirPlay 피하기 위해 포트 5001 사용)
-    app.run(
-        debug=True, 
-        port=5001,
-        host='0.0.0.0'
-    )
+    
+    # 프로덕션에서는 Gunicorn이 앱을 실행하므로 app.run() 제거
+    # 개발환경에서만 직접 실행
+    if settings.debug and __name__ == '__main__':
+        port = int(os.environ.get('PORT', settings.port))
+        app.run(
+            debug=True, 
+            port=port,
+            host=settings.host
+        )

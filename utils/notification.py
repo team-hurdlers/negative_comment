@@ -4,6 +4,7 @@
 
 import json
 import os
+import requests
 from datetime import datetime
 from typing import List, Dict, Any
 from collections import deque
@@ -16,6 +17,12 @@ class NotificationManager:
         self.max_notifications = max_notifications
         self.pending_notifications = deque(maxlen=max_notifications)
         self.notification_history_file = "notification_history.json"
+        
+        # 카카오톡 설정
+        from config.settings import settings
+        self.kakao_api_key = settings.kakao_api_key
+        self.kakao_access_token = settings.kakao_access_token  # 환경변수에서 초기화
+        self.kakao_refresh_token = None  # 리프레시 토큰
         
     def add_notification(self, title: str, message: str, notification_type: str = "info", 
                         data: Dict[str, Any] = None) -> Dict[str, Any]:
@@ -31,7 +38,8 @@ class NotificationManager:
         }
         
         self.pending_notifications.append(notification)
-        self._save_to_history(notification)
+        # 클라우드 환경에서는 파일 저장 비활성화
+        # self._save_to_history(notification)
         
         return notification
     
@@ -253,6 +261,192 @@ class NotificationManager:
                     print(f"   부정 리뷰: {data.get('negative_count', 0)}개")
             
             print()
+
+
+    def send_kakao_message(self, message: str, access_token: str = None) -> bool:
+        """카카오톡 나에게 보내기"""
+        if not access_token and not self.kakao_access_token:
+            print("⚠️ 카카오톡 액세스 토큰이 없습니다.")
+            return False
+            
+        token = access_token or self.kakao_access_token
+        
+        url = "https://kapi.kakao.com/v2/api/talk/memo/default/send"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/x-www-form-urlencoded"
+        }
+        
+        # 메시지 템플릿
+        template = {
+            "object_type": "text",
+            "text": message,
+            "link": {
+                "web_url": "https://cilantro-comment-detector-738575764165.asia-northeast3.run.app",
+                "mobile_web_url": "https://cilantro-comment-detector-738575764165.asia-northeast3.run.app"
+            }
+        }
+        
+        data = {
+            "template_object": json.dumps(template)
+        }
+        
+        try:
+            response = requests.post(url, headers=headers, data=data)
+            response.raise_for_status()
+            
+            print("✅ 카카오톡 메시지 전송 성공")
+            return True
+            
+        except requests.exceptions.RequestException as e:
+            print(f"❌ 카카오톡 메시지 전송 실패: {e}")
+            if hasattr(e, 'response') and e.response:
+                try:
+                    error_data = e.response.json()
+                    error_msg = error_data.get('msg', str(e))
+                    error_code = error_data.get('code', 'Unknown')
+                    print(f"카카오 API 에러 [{error_code}]: {error_msg}")
+                except:
+                    print(f"응답: {e.response.text}")
+            return False
+    
+    def get_kakao_auth_url(self) -> str:
+        """카카오톡 인증 URL 생성"""
+        if not self.kakao_api_key:
+            return None
+            
+        from urllib.parse import urlencode
+        
+        params = {
+            "client_id": self.kakao_api_key,
+            "redirect_uri": "https://cilantro-comment-detector-738575764165.asia-northeast3.run.app/auth/kakao/callback",
+            "response_type": "code",
+            "scope": "talk_message"
+        }
+        
+        # 강제 재인증을 위한 prompt 파라미터 추가
+        params["prompt"] = "login"
+        
+        return f"https://kauth.kakao.com/oauth/authorize?{urlencode(params)}"
+    
+    def get_kakao_access_token(self, authorization_code: str) -> str:
+        """카카오톡 액세스 토큰 발급"""
+        if not self.kakao_api_key:
+            return None
+            
+        url = "https://kauth.kakao.com/oauth/token"
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded"
+        }
+        
+        data = {
+            "grant_type": "authorization_code",
+            "client_id": self.kakao_api_key,
+            "redirect_uri": "https://cilantro-comment-detector-738575764165.asia-northeast3.run.app/auth/kakao/callback",
+            "code": authorization_code
+        }
+        
+        try:
+            response = requests.post(url, headers=headers, data=data)
+            response.raise_for_status()
+            
+            token_data = response.json()
+            print(f"🔍 카카오톡 토큰 응답: {token_data}")
+            
+            access_token = token_data.get("access_token")
+            refresh_token = token_data.get("refresh_token")
+            expires_in = token_data.get("expires_in")
+            
+            if access_token:
+                self.kakao_access_token = access_token
+                self.kakao_refresh_token = refresh_token  # 리프레시 토큰도 저장
+                print(f"✅ 카카오톡 토큰 발급 성공:")
+                print(f"   액세스 토큰: {access_token[:10]}...")
+                print(f"   리프레시 토큰: {'있음' if refresh_token else '없음'}")
+                print(f"   만료시간: {expires_in}초")
+                
+                # 토큰을 환경변수 파일에도 저장 (선택사항)
+                self._save_access_token_to_env(access_token)
+                
+            return access_token
+            
+        except requests.exceptions.RequestException as e:
+            print(f"❌ 카카오톡 토큰 발급 실패: {e}")
+            if hasattr(e, 'response') and e.response:
+                try:
+                    error_data = e.response.json()
+                    error_msg = error_data.get('error_description', error_data.get('error', str(e)))
+                    print(f"카카오 OAuth 에러: {error_msg}")
+                except:
+                    print(f"응답: {e.response.text}")
+            return None
+    
+    def _save_access_token_to_env(self, access_token: str):
+        """액세스 토큰을 .env 파일에 저장"""
+        try:
+            import os
+            env_path = ".env"
+            
+            if os.path.exists(env_path):
+                # .env 파일 읽기
+                with open(env_path, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+                
+                # KAKAO_ACCESS_TOKEN 라인 찾아서 업데이트
+                updated = False
+                for i, line in enumerate(lines):
+                    if line.startswith('KAKAO_ACCESS_TOKEN='):
+                        lines[i] = f'KAKAO_ACCESS_TOKEN={access_token}\n'
+                        updated = True
+                        break
+                
+                # 없으면 추가
+                if not updated:
+                    lines.append(f'KAKAO_ACCESS_TOKEN={access_token}\n')
+                
+                # .env 파일 쓰기
+                with open(env_path, 'w', encoding='utf-8') as f:
+                    f.writelines(lines)
+                
+                print("✅ 카카오톡 액세스 토큰을 .env 파일에 저장했습니다.")
+                
+        except Exception as e:
+            print(f"⚠️ .env 파일 저장 실패: {e}")
+    
+    def send_review_alert_to_kakao(self, new_reviews: List[Dict], negative_reviews: List[Dict]) -> bool:
+        """부정 리뷰 알림을 카카오톡으로 전송"""
+        if not self.kakao_access_token:
+            print("⚠️ 카카오톡 인증이 필요합니다.")
+            return False
+            
+        if not negative_reviews and not new_reviews:
+            return True
+            
+        # 메시지 구성
+        if negative_reviews:
+            message = f"🚨 부정 리뷰 {len(negative_reviews)}개 발견!\n"
+            message += f"신규 리뷰 총 {len(new_reviews)}개 중 부정 리뷰가 발견되었습니다.\n\n"
+            
+            # 부정 리뷰 샘플 추가 (최대 2개)
+            for i, review in enumerate(negative_reviews[:2]):
+                content = review.get('content', '내용 없음')[:50]
+                message += f"• {content}...\n"
+                
+            if len(negative_reviews) > 2:
+                message += f"• 외 {len(negative_reviews) - 2}개 더\n"
+                
+        else:
+            message = f"📝 신규 리뷰 {len(new_reviews)}개 발견\n"
+            message += f"새로운 리뷰가 등록되었습니다.\n\n"
+            
+            if new_reviews:
+                content = new_reviews[0].get('content', '내용 없음')[:50]
+                message += f"최신: {content}...\n"
+        
+        message += f"\n시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        message += f"\n대시보드에서 자세히 보기 ↓"
+        
+        return self.send_kakao_message(message)
 
 
 # 전역 알림 관리자 인스턴스

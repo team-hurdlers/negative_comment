@@ -9,15 +9,15 @@ python app.py
 
 ### 2. 카페24 개발자 센터에서 앱 생성
 - [카페24 개발자센터](https://developers.cafe24.com/) → 로그인 → "새 앱 만들기"
-- Redirect URL: `http://localhost:5000/callback`
+- Redirect URL: `http://localhost:5001/callback`
 - Client ID, Client Secret 복사
 
 ### 3. API 설정
-브라우저에서 `http://localhost:5000` → 설정 페이지에서 입력
+브라우저에서 `http://localhost:5001` → 설정 페이지에서 입력
 
 또는 cURL:
 ```bash
-curl -X POST http://localhost:5000/auth/setup \
+curl -X POST http://localhost:5001/auth/setup \
   -H "Content-Type: application/json" \
   -d '{
     "client_id": "발급받은_클라이언트_ID",
