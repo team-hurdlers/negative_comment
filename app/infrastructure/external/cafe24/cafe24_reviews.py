@@ -296,39 +296,3 @@ class Cafe24ReviewAPI:
                 continue
         
         return reviews[:limit]
-    
-    def get_products(self, limit: int = 100) -> List[Dict]:
-        """
-        상품 목록 조회
-        
-        Args:
-            limit: 조회할 상품 수
-            
-        Returns:
-            상품 목록
-        """
-        params = {
-            'limit': limit,
-            'fields': 'product_no,product_name,product_code,price,display'
-        }
-        
-        result = self._make_request('GET', 'admin/products', params=params)
-        return result.get('products', [])
-    
-    def get_product_info(self, product_no: int) -> Dict:
-        """
-        특정 상품 정보 조회
-        
-        Args:
-            product_no: 상품 번호
-            
-        Returns:
-            상품 정보
-        """
-        try:
-            result = self._make_request('GET', f'admin/products/{product_no}', 
-                                        params={'fields': 'product_no,product_name'})
-            return result.get('product', {})
-        except Exception as e:
-            print(f"상품 {product_no} 정보 조회 오류: {e}")
-            return {}

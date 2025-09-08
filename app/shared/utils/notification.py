@@ -24,6 +24,11 @@ class NotificationManager:
         self.kakao_access_token = settings.kakao_access_token  # 환경변수에서 초기화
         self.kakao_refresh_token = None  # 리프레시 토큰
         
+        # 채널톡 설정
+        self.channel_talk_access_token = settings.channel_talk_access_key
+        self.channel_talk_secret = settings.channel_talk_secret_key
+        self.channel_talk_group_id = settings.channel_talk_group_id
+        
     def add_notification(self, title: str, message: str, notification_type: str = "info", 
                         data: Dict[str, Any] = None) -> Dict[str, Any]:
         """알림 추가"""
@@ -447,6 +452,169 @@ class NotificationManager:
         message += f"\n대시보드에서 자세히 보기 ↓"
         
         return self.send_kakao_message(message)
+    
+    def send_channel_talk_message(self, message: str, group_id: str = None) -> bool:
+        """채널톡 팀 채팅 그룹에 메시지 전송"""
+        if not self.channel_talk_access_token or not self.channel_talk_secret:
+            print("⚠️ 채널톡 인증 정보가 없습니다.")
+            return False
+        
+        # 그룹 ID 사용 (환경변수 또는 파라미터)
+        target_group_id = group_id or self.channel_talk_group_id
+        if not target_group_id:
+            print("⚠️ 채널톡 그룹 ID가 없습니다.")
+            return False
+        
+        # 채널톡 팀 채팅 메시지 전송 API
+        url = f"https://api.channel.io/open/v5/groups/{target_group_id}/messages"
+        
+        headers = {
+            "x-access-key": self.channel_talk_access_token,
+            "x-access-secret": self.channel_talk_secret,
+            "Content-Type": "application/json"
+        }
+        
+        # 메시지 데이터 구성
+        data = {
+            "blocks": [
+                {
+                    "type": "text",
+                    "value": message
+                }
+            ]
+        }
+        
+        try:
+            response = requests.post(url, headers=headers, json=data)
+            response.raise_for_status()
+            
+            print(f"✅ 채널톡 메시지 전송 성공 (그룹 ID: {target_group_id})")
+            return True
+            
+        except requests.exceptions.RequestException as e:
+            print(f"❌ 채널톡 메시지 전송 실패: {e}")
+            if hasattr(e, 'response') and e.response:
+                try:
+                    error_data = e.response.json()
+                    error_msg = error_data.get('message', str(e))
+                    error_code = error_data.get('code', 'Unknown')
+                    print(f"채널톡 API 에러 [{error_code}]: {error_msg}")
+                except:
+                    print(f"응답: {e.response.text}")
+            return False
+    
+    def send_review_alert_to_channel_talk(self, new_reviews: List[Dict], negative_reviews: List[Dict], channel_id: str = None) -> bool:
+        """부정 리뷰 알림을 채널톡으로 전송"""
+        if not self.channel_talk_access_token:
+            print("⚠️ 채널톡 토큰이 없습니다. 환경변수에서 다시 로드 시도...")
+            from config.settings import settings
+            self.channel_talk_access_token = settings.channel_talk_access_key
+            self.channel_talk_secret = settings.channel_talk_secret_key
+            self.channel_talk_group_id = settings.channel_talk_group_id
+            
+        if not self.channel_talk_access_token:
+            print("❌ 채널톡 인증이 필요합니다. CHANNEL_TALK_ACCESS_TOKEN 환경변수를 확인하세요.")
+            return False
+            
+        if not negative_reviews and not new_reviews:
+            return True
+            
+        # 메시지 구성
+        if negative_reviews:
+            # 부정 + 중립 리뷰 분류
+            actual_negative = [r for r in negative_reviews if r.get('is_negative', False)]
+            neutral_reviews = [r for r in negative_reviews if not r.get('is_negative', False)]
+            
+            message = f"🚨 주의 필요한 리뷰 발견!\n"
+            if actual_negative:
+                message += f"부정 리뷰: {len(actual_negative)}개"
+            if neutral_reviews:
+                message += f" | 중립 리뷰: {len(neutral_reviews)}개"
+            message += f"\n{'=' * 40}\n\n"
+            
+            # 각 리뷰의 상세 정보
+            for i, review in enumerate(negative_reviews):
+                review_type = "🔴 부정" if review.get('is_negative', False) else "🟡 중립"
+                message += f"📌 {review_type} 리뷰 #{i+1}\n"
+                message += f"상품명: {review.get('product_name', '알 수 없음')}\n"
+                message += f"제목: {review.get('title', '제목 없음')}\n"
+                message += f"내용: {review.get('content', '내용 없음')}\n"
+                message += f"별점: {'⭐' * int(review.get('rating', 0))} ({review.get('rating', 0)}/5)\n"
+                message += f"작성자: {review.get('writer', '익명')}\n"
+                message += f"등록시간: {review.get('created_date', '시간 정보 없음')}\n"
+                message += f"신뢰도: {review.get('confidence', 0):.2f}\n"
+                message += "-" * 30 + "\n\n"
+                
+        else:
+            # 일반 신규 리뷰인 경우 - 간단한 정보
+            message = f"📝 신규 리뷰 {len(new_reviews)}개 발견\n"
+            message += f"새로운 리뷰가 등록되었습니다.\n\n"
+            
+            if new_reviews:
+                latest_review = new_reviews[0]
+                message += f"최신 리뷰:\n"
+                message += f"상품명: {latest_review.get('product_name', '알 수 없음')}\n"
+                message += f"제목: {latest_review.get('title', '제목 없음')}\n"
+                message += f"내용: {latest_review.get('content', '내용 없음')[:100]}...\n"
+                message += f"별점: {'⭐' * int(latest_review.get('rating', 0))} ({latest_review.get('rating', 0)}/5)\n"
+        
+        message += f"\n🕐 알림 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        message += f"\n🔗 대시보드: https://cilantro-comment-detector-738575764165.asia-northeast3.run.app"
+        
+        return self.send_channel_talk_message(message, channel_id)
+    
+    def send_notification_to_all(self, new_reviews: List[Dict], negative_reviews: List[Dict], 
+                                notification_method: str = "both") -> Dict[str, bool]:
+        """모든 알림 채널로 알림 전송
+        
+        Args:
+            new_reviews: 신규 리뷰 목록
+            negative_reviews: 부정 리뷰 목록
+            notification_method: "kakao", "channel_talk", "both"
+            
+        Returns:
+            각 채널별 전송 결과
+        """
+        results = {}
+        
+        if notification_method in ["kakao", "both"]:
+            if self.kakao_access_token:
+                results["kakao"] = self.send_review_alert_to_kakao(new_reviews, negative_reviews)
+            else:
+                results["kakao"] = False
+                print("⚠️ 카카오톡 토큰이 없어 전송하지 않습니다.")
+        
+        if notification_method in ["channel_talk", "both"]:
+            # 채널톡 토큰 재확인 및 재시도
+            if not self.channel_talk_access_token:
+                print("⚠️ 채널톡 토큰이 없습니다. 환경변수에서 다시 로드 시도...")
+                from config.settings import settings
+                self.channel_talk_access_token = settings.channel_talk_access_key
+                self.channel_talk_secret = settings.channel_talk_secret_key
+                self.channel_talk_group_id = settings.channel_talk_group_id
+            
+            if self.channel_talk_access_token:
+                results["channel_talk"] = self.send_review_alert_to_channel_talk(new_reviews, negative_reviews)
+            else:
+                results["channel_talk"] = False
+                print("❌ 채널톡 토큰을 찾을 수 없습니다. CHANNEL_TALK_ACCESS_TOKEN 환경변수를 확인하세요.")
+        
+        return results
+
+    def send_simple_channel_talk_message(self, message: str, group_id: str = None) -> bool:
+        """간단한 채널톡 메시지 전송 (웹훅용)"""
+        if not self.channel_talk_access_token:
+            # 토큰 재로드 시도
+            from config.settings import settings
+            self.channel_talk_access_token = settings.channel_talk_access_key
+            self.channel_talk_secret = settings.channel_talk_secret_key
+            self.channel_talk_group_id = settings.channel_talk_group_id
+            
+        if not self.channel_talk_access_token:
+            print("❌ 채널톡 토큰을 찾을 수 없습니다.")
+            return False
+            
+        return self.send_message_to_channel_talk(message, group_id)
 
 
 # 전역 알림 관리자 인스턴스

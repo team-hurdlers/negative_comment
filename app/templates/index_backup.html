@@ -301,6 +301,11 @@
             background: #f9f9f9;
         }
         
+        .result-card.neutral {
+            border-left: 4px solid #6b7280;
+            background: #f9f9f9;
+        }
+        
         .result-label {
             font-weight: 600;
             font-size: 0.875rem;
@@ -688,20 +693,13 @@
                     <!-- 카페24 기능들 -->
                     <div class="monitor-controls">
                         <button class="button button-accent" onclick="getLatestReviews()">📝 최신 리뷰 분석</button>
-                        <button class="button button-secondary" onclick="getReviewBoards()">📋 리뷰 게시판</button>
                         <button class="button button-secondary" onclick="getProducts()">📦 상품 목록</button>
-                        
-                        <!-- 상품별 리뷰 조회 -->
-                        <input type="number" id="product-no" class="input" placeholder="상품번호 (예: 39)" style="width: 180px; margin-right: 8px;">
-                        <button class="button button-accent" onclick="getProductReviews()">🔍 상품별 리뷰</button>
-                        
-                        <!-- 키워드 검색 -->
-                        <input type="text" id="search-keyword" class="input" placeholder="키워드 (예: 만족)" style="width: 180px; margin-right: 8px;">
-                        <button class="button button-accent" onclick="searchReviews()">🔎 키워드 검색</button>
+                        <button class="button button-success" onclick="sendChannelTalkTest()">💬 채널톡 테스트 메시지</button>
                     </div>
                 </div>
                 
-                <!-- 카카오톡 알림 -->
+                <!-- 카카오톡 알림 (재사용을 위해 주석처리) -->
+                <!--
                 <div class="card" style="margin-top: 16px;">
                     <div class="card-header">
                         <h3 class="card-title">📱 카카오톡 알림</h3>
@@ -710,18 +708,39 @@
                         웹훅으로 부정 리뷰 발견 시 자동 알림 전송
                     </div>
                     
-                    <!-- 카카오톡 연동 상태 -->
                     <div class="status-indicator" id="kakao-status" style="text-align: center;">
                         <span id="kakao-connection-status">🔄 연동 상태 확인중...</span>
                     </div>
                     
-                    <!-- 카카오톡 메시지 상태 -->
                     <div class="status-indicator" id="monitor-status" style="margin: 16px 0; text-align: center; display: none;"></div>
                     
-                    <!-- 테스트 버튼 -->
                     <div class="monitor-controls">
                         <button class="button button-secondary" onclick="sendKakaoTestMessage()">🧪 테스트 메시지 전송</button>
                         <button class="button button-outline" onclick="forceKakaoReauth()" style="margin-left: 8px;">🔄 카카오톡 재인증</button>
+                    </div>
+                </div>
+                -->
+                
+                <!-- 채널톡 알림 -->
+                <div class="card" style="margin-top: 16px;">
+                    <div class="card-header">
+                        <h3 class="card-title">💬 채널톡 알림</h3>
+                    </div>
+                    <div class="supported-sites">
+                        웹훅으로 부정 리뷰 발견 시 '🖤부정VOC' 그룹에 자동 알림 전송
+                    </div>
+                    
+                    <!-- 채널톡 연동 상태 -->
+                    <div class="status-indicator" id="channel-talk-status" style="text-align: center;">
+                        <span id="channel-talk-connection-status">🔄 연동 상태 확인중...</span>
+                    </div>
+                    
+                    <!-- 채널톡 메시지 상태 -->
+                    <div class="status-indicator" id="channel-talk-monitor-status" style="margin: 16px 0; text-align: center; display: none;"></div>
+                    
+                    <!-- 테스트 버튼 -->
+                    <div class="monitor-controls">
+                        <button class="button button-secondary" onclick="sendChannelTalkTestMessage()">🧪 테스트 메시지 전송</button>
                     </div>
                 </div>
             </div>
@@ -849,7 +868,8 @@
         window.addEventListener('load', function() {
             requestNotificationPermission();
             checkAuthStatus();
-            checkKakaoConnectionStatus();
+            // checkKakaoConnectionStatus(); // 카카오톡 사용하지 않음
+            checkChannelTalkConnectionStatus(); // 채널톡 상태 확인
         });
         
         
@@ -1249,7 +1269,8 @@
             }
         }
         
-        // ===== 카카오톡 알림 함수들 =====
+        // ===== 카카오톡 알림 함수들 (재사용을 위해 주석처리) =====
+        /*
         
         async function checkKakaoConnectionStatus() {
             try {
@@ -1378,6 +1399,85 @@
                 showError('카카오톡 메시지 전송 오류: ' + error.message);
             }
         }
+        */
+        
+        // ===== 채널톡 알림 함수들 =====
+        
+        async function checkChannelTalkConnectionStatus() {
+            try {
+                const response = await fetch('/auth/channel-talk/status');
+                const data = await response.json();
+                const statusSpan = document.getElementById('channel-talk-connection-status');
+                const statusDiv = document.getElementById('channel-talk-status');
+                
+                if (data.authenticated) {
+                    statusSpan.textContent = '🟢 채널톡 연동 ON';
+                    statusSpan.style.color = 'var(--success)';
+                    statusDiv.className = 'status-indicator status-active';
+                } else {
+                    statusSpan.textContent = '🔴 채널톡 연동 OFF';
+                    statusSpan.style.color = 'var(--destructive)';
+                    statusDiv.className = 'status-indicator status-inactive';
+                }
+            } catch (error) {
+                const statusSpan = document.getElementById('channel-talk-connection-status');
+                const statusDiv = document.getElementById('channel-talk-status');
+                statusSpan.textContent = '❌ 연동 상태 확인 실패';
+                statusSpan.style.color = 'var(--destructive)';
+                statusDiv.className = 'status-indicator status-inactive';
+                console.error('채널톡 상태 확인 오류:', error);
+            }
+        }
+        
+        async function sendChannelTalkTestMessage() {
+            try {
+                // 먼저 채널톡 연동 상태 확인
+                const statusResponse = await fetch('/auth/channel-talk/status');
+                const statusData = await statusResponse.json();
+                
+                if (!statusData.authenticated) {
+                    showError('채널톡 인증이 필요합니다. API 토큰과 시크릿을 확인해주세요.');
+                    return;
+                }
+                
+                // 연동 상태가 정상이면 메시지 전송
+                const response = await fetch('/test/channel-talk-notification', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        message: '테스트 메시지입니다. 채널톡 알림이 정상적으로 작동하고 있습니다! 🎉'
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showChannelTalkMonitorStatus('💬 채널톡 테스트 메시지가 전송되었습니다!', 'success');
+                    hideError(); // 성공 시 에러 메시지 숨김
+                } else {
+                    showError(data.error || '채널톡 메시지 전송 오류');
+                }
+            } catch (error) {
+                showError('채널톡 메시지 전송 오류: ' + error.message);
+            }
+        }
+        
+        function showChannelTalkMonitorStatus(message, type) {
+            const statusDiv = document.getElementById('channel-talk-monitor-status');
+            statusDiv.textContent = message;
+            statusDiv.style.display = 'block';
+            
+            statusDiv.className = `status-indicator ${type === 'success' ? 'status-active' : 'status-inactive'}`;
+            statusDiv.style.color = type === 'success' ? 'var(--success)' : 
+                                   type === 'warning' ? 'var(--warning)' : 'var(--info)';
+            
+            // 5초 후 자동 숨김
+            setTimeout(() => {
+                statusDiv.style.display = 'none';
+            }, 5000);
+        }
         
         async function getLatestReviews() {
             return requireAuth(() => {
@@ -1390,7 +1490,9 @@
             hideError();
             
             try {
-                const response = await fetch('/api/reviews/latest?limit=10');
+                const response = await fetch('/api/reviews/latest?limit=10', {
+                    credentials: 'include'
+                });
                 const data = await response.json();
                 
                 if (response.ok) {
@@ -1405,29 +1507,6 @@
             }
         }
         
-        async function getReviewBoards() {
-            return requireAuth(() => performGetReviewBoards());
-        }
-        
-        async function performGetReviewBoards() {
-            showLoading(true);
-            hideError();
-            
-            try {
-                const response = await fetch('/api/reviews/boards');
-                const data = await response.json();
-                
-                if (response.ok) {
-                    displayBoardsResults(data);
-                } else {
-                    showError(data.error || '게시판 조회 오류');
-                }
-            } catch (error) {
-                showError('서버 연결 오류: ' + error.message);
-            } finally {
-                showLoading(false);
-            }
-        }
         
         async function getProducts() {
             return requireAuth(() => performGetProducts());
@@ -1453,49 +1532,11 @@
             }
         }
         
-        async function getProductReviews() {
-            return requireAuth(() => {
-                const productNo = document.getElementById('product-no').value.trim();
-                if (!productNo) {
-                    showError('상품번호를 입력해주세요.');
-                    return;
-                }
-                
-                return performGetProductReviews(productNo);
-            });
+        // 채널톡 테스트 메시지 전송 (기존 엔드포인트 사용)
+        async function sendChannelTalkTest() {
+            await testChannelTalkNotification();
         }
         
-        async function performGetProductReviews(productNo) {
-            showLoading(true);
-            hideError();
-            
-            try {
-                const response = await fetch(`/api/reviews/product/${productNo}?limit=10`);
-                const data = await response.json();
-                
-                if (response.ok) {
-                    displayCafe24Results(data, `🔍 상품 ${productNo}번 리뷰 분석 결과`);
-                } else {
-                    showError(data.error || '상품 리뷰 조회 오류');
-                }
-            } catch (error) {
-                showError('서버 연결 오류: ' + error.message);
-            } finally {
-                showLoading(false);
-            }
-        }
-        
-        async function searchReviews() {
-            return requireAuth(() => {
-                const keyword = document.getElementById('search-keyword').value.trim();
-                if (!keyword) {
-                    showError('검색 키워드를 입력해주세요.');
-                    return;
-                }
-                
-                return performSearchReviews(keyword);
-            });
-        }
         
         async function performSearchReviews(keyword) {
             showLoading(true);
@@ -1556,7 +1597,7 @@
                 data.negative_reviews.forEach(review => {
                     html += `
                         <div class="result-card negative">
-                            <div class="result-label">🚨 부정 리뷰 (신뢰도: ${review.score}%)<br><strong>${escapeHtml(review.title || '')}</strong></div>
+                            <div class="result-label">🚨 부정 리뷰<br><strong>${escapeHtml(review.title || '')}</strong></div>
                             <div class="result-text">${createExpandableText(review.content || '', 100)}</div>
                             <div class="result-score">
                                 작성자: ${escapeHtml(review.writer || 'unknown')} | 
@@ -1587,7 +1628,11 @@
                                 </label>
                                 <label class="filter-label">
                                     <input type="radio" name="${reviewId}" value="positive" onchange="filterReviews('${reviewId}', 'positive')">
-                                    긍정 (${data.reviews.filter(r => !r.is_negative).length}개)
+                                    긍정 (${data.reviews.filter(r => r.is_positive).length}개)
+                                </label>
+                                <label class="filter-label">
+                                    <input type="radio" name="${reviewId}" value="neutral" onchange="filterReviews('${reviewId}', 'neutral')">
+                                    보통 (${data.reviews.filter(r => r.is_neutral).length}개)
                                 </label>
                             </div>
                         </div>
@@ -1596,12 +1641,28 @@
                 
                 // 모든 리뷰 렌더링 (처음 10개만)
                 data.reviews.slice(0, 10).forEach(review => {
-                    const cardClass = review.is_negative ? 'negative' : 'positive';
-                    const label = review.is_negative ? '부정' : '긍정';
-                    const filterClass = review.is_negative ? 'review-negative' : 'review-positive';
+                    let cardClass, label, filterClass, reviewType;
+                    
+                    if (review.is_negative) {
+                        cardClass = 'negative';
+                        label = '부정';
+                        filterClass = 'review-negative';
+                        reviewType = 'negative';
+                    } else if (review.is_positive) {
+                        cardClass = 'positive';
+                        label = '긍정';
+                        filterClass = 'review-positive';
+                        reviewType = 'positive';
+                    } else {
+                        cardClass = 'neutral';
+                        label = '보통';
+                        filterClass = 'review-neutral';
+                        reviewType = 'neutral';
+                    }
+                    
                     html += `
-                        <div class="result-card ${cardClass} ${filterClass}" data-review-type="${review.is_negative ? 'negative' : 'positive'}">
-                            <div class="result-label">${label} (${review.score}%)<br><strong>${escapeHtml(review.title || '')}</strong></div>
+                        <div class="result-card ${cardClass} ${filterClass}" data-review-type="${reviewType}">
+                            <div class="result-label">${label}<br><strong>${escapeHtml(review.title || '')}</strong></div>
                             <div class="result-text">${createExpandableText(review.content || '', 100)}</div>
                             <div class="result-score">
                                 작성자: ${escapeHtml(review.writer || 'unknown')} | 
@@ -1619,31 +1680,6 @@
             resultsDiv.style.display = 'block';
         }
         
-        function displayBoardsResults(data) {
-            const resultsDiv = document.getElementById('results');
-            let html = '<div class="card"><h2 class="card-title">📋 리뷰 게시판 목록</h2></div>';
-            
-            if (data.boards && data.boards.length > 0) {
-                data.boards.forEach(board => {
-                    html += `
-                        <div class="result-card">
-                            <div class="result-label">${escapeHtml(board.board_name)} (번호: ${board.board_no})</div>
-                            <div class="result-text">${escapeHtml(board.board_guide || '설명 없음')}</div>
-                            <div class="result-score">
-                                게시판 타입: ${board.board_type} | 
-                                페이지당 표시: ${board.page_display_count}개 |
-                                댓글 기능: ${board.use_comment === 'T' ? '사용' : '미사용'}
-                            </div>
-                        </div>
-                    `;
-                });
-            } else {
-                html += '<div class="card"><p>리뷰 게시판을 찾을 수 없습니다.</p></div>';
-            }
-            
-            resultsDiv.innerHTML = html;
-            resultsDiv.style.display = 'block';
-        }
         
         function displayProductsResults(data) {
             const resultsDiv = document.getElementById('results');
@@ -1661,7 +1697,7 @@
                             </div>
                             <div class="result-score">
                                 노출상태: ${product.display === 'T' ? '노출' : '숨김'}
-                                <button class="button button-accent" onclick="document.getElementById('product-no').value='${product.product_no}';" style="margin-left: 8px; padding: 4px 8px; font-size: 0.75rem;">이 상품 리뷰 보기</button>
+                                <button class="button button-accent" onclick="document.getElementById('product-no').value='${product.product_no}'; getProductReviews();" style="margin-left: 8px; padding: 4px 8px; font-size: 0.75rem;">이 상품 리뷰 보기</button>
                             </div>
                         </div>
                     `;

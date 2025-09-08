@@ -22,11 +22,8 @@ class ReviewAnalyzer:
         self.load_models()
         
     def load_models(self):
-        """감정 분석 모델 로드 - GPT-4o-mini와 pkl만"""
-        # 1순위: OpenAI GPT-4o-mini
-        self._load_openai_client()
-        
-        # 2순위: pkl 모델 (경량)
+        """감정 분석 모델 로드 - pkl만 (GPT는 필요시 로드)"""
+        # pkl 모델만 먼저 로드
         self._load_pkl_model()
     
     def _load_openai_client(self):
@@ -41,7 +38,7 @@ class ReviewAnalyzer:
     
     def _load_pkl_model(self):
         """pkl 감정 분석 모델 로드"""
-        model_path = "lightweight_sentiment_model.pkl"
+        model_path = "final_svm_sentiment_model.pkl"
         
         if os.path.exists(model_path):
             try:
@@ -72,8 +69,8 @@ class ReviewAnalyzer:
         
         return text.strip()
     
-    def analyze_single_review(self, review_text: str) -> Dict[str, Any]:
-        """단일 리뷰 감정 분석 - 다중 방법 폴백"""
+    def analyze_single_review(self, review_text: str, rating: int = None) -> Dict[str, Any]:
+        """단일 리뷰 감정 분석 - pkl 1차, 충돌 시 GPT 2차"""
         if not review_text or not review_text.strip():
             return {
                 'is_negative': False,
@@ -84,33 +81,116 @@ class ReviewAnalyzer:
                 'error': '텍스트 없음'
             }
         
-        # 1차 시도: GPT-4o-mini
-        gpt_result = self._analyze_with_gpt(review_text)
-        if gpt_result:
-            return gpt_result
-        
-        # 2차 시도: pkl 모델
+        # 1차 분석: pkl 모델 사용
         pkl_result = self._analyze_with_pkl(review_text)
-        if pkl_result:
-            return pkl_result
+        if not pkl_result:
+            return {
+                'is_negative': False,
+                'confidence': 0,
+                'label': '분석불가',
+                'score': 0,
+                'method': 'pkl_failed',
+                'error': 'pkl 모델 분석 실패'
+            }
         
-        # 모든 방법 실패
-        return {
-            'is_negative': False,
-            'confidence': 0,
-            'label': '분석실패',
-            'score': 0,
-            'method': 'failed',
-            'error': '모든 분석 방법 실패'
-        }
+        # 2차 분석: 판단과 평점이 모순되는 경우 GPT로 재검증
+        conflict_detected = False
+        conflict_type = ""
+        
+        # Case 1: 부정 판단 + 5점 평점
+        if pkl_result.get('is_negative') and rating == 5:
+            conflict_detected = True
+            conflict_type = "negative_with_5stars"
+            print(f"🔄 충돌 감지: 부정 판단 + 5점 평점 → GPT 2차 분석 시작")
+        
+        # Case 2: 긍정 판단 + 낮은 평점 (1-3점)
+        elif pkl_result.get('is_positive') and rating in [1, 2, 3]:
+            conflict_detected = True
+            conflict_type = "positive_with_low_rating"
+            print(f"🔄 충돌 감지: 긍정 판단 + {rating}점 평점 → GPT 2차 분석 시작")
+        
+        if conflict_detected:
+            # GPT 클라이언트가 없으면 이때 로드
+            if self.openai_client is None:
+                print("🔄 GPT 클라이언트 초기화 중...")
+                self._load_openai_client()
+            
+            gpt_result = self._analyze_with_gpt(review_text, is_second_stage=True, conflict_type=conflict_type, rating=rating)
+            if gpt_result:
+                # GPT 결과를 우선 채택하되, pkl 결과도 기록
+                gpt_result['first_stage_result'] = pkl_result
+                gpt_result['conflict_resolved'] = True
+                gpt_result['conflict_type'] = conflict_type
+                print(f"🎯 GPT 2차 분석 완료: {gpt_result.get('label')} (1차: {pkl_result.get('label')} → 2차: {gpt_result.get('label')})")
+                return gpt_result
+            else:
+                print(f"⚠️ GPT 2차 분석 실패, 1차 결과 유지")
+        
+        return pkl_result
     
-    def _analyze_with_gpt(self, review_text: str) -> Dict[str, Any]:
+    def _analyze_with_gpt(self, review_text: str, is_second_stage: bool = False, conflict_type: str = None, rating: int = None) -> Dict[str, Any]:
         """GPT-4o-mini를 이용한 감정 분석"""
         if not self.openai_client:
             return None
         
         try:
-            prompt = f"""
+            if is_second_stage:
+                if conflict_type == "negative_with_5stars":
+                    prompt = f"""
+다음은 5점 만점에 5점을 받은 리뷰이지만, 1차 AI 모델에서는 부정적으로 분류되었습니다.
+평점과 내용 사이의 모순을 해결하기 위해 정확한 재분석이 필요합니다.
+
+리뷰 내용: "{review_text}"
+평점: ⭐⭐⭐⭐⭐ (5/5점)
+
+다음을 고려하여 분석해주세요:
+1. 평점이 5점이라는 사실
+2. 한국어의 미묘한 표현과 문맥
+3. 반어법이나 아이러니 사용 여부
+4. 전반적인 만족도와 추천 의도
+
+다음 중 하나로 분류해주세요:
+- positive: 긍정적인 리뷰 (만족, 좋음, 추천 등)
+- negative: 부정적인 리뷰 (불만, 나쁨, 비추천 등)  
+- neutral: 중립적인 리뷰 (단순 설명, 객관적 정보 등)
+
+JSON 형태로만 답변해주세요:
+{{
+    "sentiment": "positive|negative|neutral",
+    "confidence": 0.0~1.0,
+    "reasoning": "분석 근거"
+}}
+"""
+                elif conflict_type == "positive_with_low_rating":
+                    stars = "⭐" * rating
+                    prompt = f"""
+다음은 {rating}점 만점에 {rating}점을 받은 리뷰이지만, 1차 AI 모델에서는 긍정적으로 분류되었습니다.
+평점과 내용 사이의 모순을 해결하기 위해 정확한 재분석이 필요합니다.
+
+리뷰 내용: "{review_text}"
+평점: {stars} ({rating}/5점)
+
+다음을 고려하여 분석해주세요:
+1. 평점이 {rating}점(낮음)이라는 사실
+2. 한국어의 미묘한 표현과 문맥
+3. 비꼬기나 간접적 불만 표현 여부
+4. 실제 만족도와 불만 사항
+5. 낮은 평점의 이유가 내용에 반영되어 있는지
+
+다음 중 하나로 분류해주세요:
+- positive: 긍정적인 리뷰 (만족, 좋음, 추천 등)
+- negative: 부정적인 리뷰 (불만, 나쁨, 비추천 등)  
+- neutral: 중립적인 리뷰 (단순 설명, 객관적 정보 등)
+
+JSON 형태로만 답변해주세요:
+{{
+    "sentiment": "positive|negative|neutral",
+    "confidence": 0.0~1.0,
+    "reasoning": "분석 근거"
+}}
+"""
+            else:
+                prompt = f"""
 다음 리뷰의 감정을 분석해주세요. 한국어 리뷰입니다.
 
 리뷰 내용: "{review_text}"
@@ -146,13 +226,30 @@ JSON 형태로만 답변해주세요:
                 is_negative = gpt_result.get('sentiment') == 'negative'
                 confidence = float(gpt_result.get('confidence', 0.5))
                 
+                # 3가지 카테고리 분류
+                sentiment = gpt_result.get('sentiment')
+                is_negative = (sentiment == 'negative')
+                is_positive = (sentiment == 'positive')
+                is_neutral = (sentiment == 'neutral')
+                
+                # 라벨 결정
+                if sentiment == 'negative':
+                    label = '부정적'
+                elif sentiment == 'positive':
+                    label = '긍정적'
+                else:
+                    label = '중립적'
+                
                 return {
                     'is_negative': is_negative,
+                    'is_positive': is_positive,
+                    'is_neutral': is_neutral,
                     'confidence': confidence,
-                    'label': '부정적' if is_negative else '긍정적',
+                    'label': label,
                     'score': round(confidence * 100, 2),
-                    'method': 'gpt-4o-mini',
+                    'method': 'gpt-4o-mini-2nd' if is_second_stage else 'gpt-4o-mini',
                     'reasoning': gpt_result.get('reasoning', ''),
+                    'sentiment': sentiment,
                     'original_result': gpt_result
                 }
             except json.JSONDecodeError:
@@ -176,20 +273,52 @@ JSON 형태로만 답변해주세요:
             
             # pkl 모델로 예측
             prediction = self.pkl_model.predict([clean_text])[0]
-            confidence = max(self.pkl_model.predict_proba([clean_text])[0])
+            probabilities = self.pkl_model.predict_proba([clean_text])[0]
+            confidence = probabilities[prediction]  # 예측된 클래스의 실제 확률
             
             # 예측 결과를 표준 형태로 변환
             sentiment_map = {0: 'negative', 1: 'neutral', 2: 'positive'}
             sentiment = sentiment_map.get(prediction, 'neutral')
+            
+            # 3가지 카테고리 분류
             is_negative = (sentiment == 'negative')
+            is_positive = (sentiment == 'positive')
+            is_neutral = (sentiment == 'neutral')
+            
+            # 신뢰도를 백분율로 변환 (0~100% 범위로 제한)
+            confidence_percent = round(max(0.0, min(confidence * 100, 100.0)), 2)
+            
+            # 낮은 신뢰도 체크 (60% 이하)
+            low_confidence = confidence < 0.6
+            
+            # 라벨 결정
+            if low_confidence:
+                if sentiment == 'negative':
+                    label = "부정적 (확인 필요)"
+                elif sentiment == 'positive':
+                    label = "긍정적 (확인 필요)"
+                else:
+                    label = "중립적 (확인 필요)"
+            else:
+                if sentiment == 'negative':
+                    label = '부정적'
+                elif sentiment == 'positive':
+                    label = '긍정적'
+                else:
+                    label = '중립적'
             
             return {
                 'is_negative': is_negative,
-                'confidence': float(confidence),
-                'label': '부정적' if is_negative else '긍정적',
-                'score': round(confidence * 100, 2),
+                'is_positive': is_positive,
+                'is_neutral': is_neutral,
+                'sentiment': sentiment,
+                'confidence': confidence_percent,
+                'label': label,
+                'score': confidence_percent,
                 'method': 'pkl_model',
-                'original_prediction': prediction
+                'original_prediction': prediction,
+                'low_confidence': low_confidence,
+                'confidence_raw': float(confidence)
             }
             
         except Exception as e:
@@ -214,8 +343,9 @@ JSON 형태로만 답변해주세요:
             elif 'title' in review:
                 review_text = review['title']
             
-            # 감정 분석 수행
-            analysis_result = self.analyze_single_review(review_text)
+            # 감정 분석 수행 (평점 정보 포함)
+            rating = review.get('rating', 0)
+            analysis_result = self.analyze_single_review(review_text, rating)
             
             # 원본 리뷰 데이터와 분석 결과 병합
             analyzed_review = review.copy()

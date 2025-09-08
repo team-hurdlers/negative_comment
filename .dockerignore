@@ -53,7 +53,8 @@ Thumbs.db
 *.log
 
 # Runtime files (Cloud Run에서 자동 생성됨)
-*.json
+known_reviews.json
+review_cache.json
 *.pid
 
 # Documentation (배포시 불필요)

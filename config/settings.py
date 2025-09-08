@@ -19,11 +19,17 @@ class Settings:
         self.kakao_access_token = os.getenv("KAKAO_ACCESS_TOKEN")
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
 
+        # Channel Talk 설정
+        self.channel_talk_access_key = os.getenv("CHANNEL_TALK_ACCESS_TOKEN")
+        self.channel_talk_secret_key = os.getenv("CHANNEL_TALK_SECRET")
+        self.channel_talk_group_id = os.getenv("CHANNEL_TALK_GROUP_ID")
+
         
         # 모니터링 설정
         self.check_interval = int(os.getenv("CHECK_INTERVAL", "300"))
         self.max_reviews_per_check = int(os.getenv("MAX_REVIEWS_PER_CHECK", "50"))
         self.notification_enabled = os.getenv("NOTIFICATION_ENABLED", "false").lower() == "true"
+        self.notification_method = os.getenv("NOTIFICATION_METHOD", "both")  # kakao, channel_talk, both
         
         # 앱 설정
         self.debug = os.getenv("DEBUG", "false").lower() == "true"
