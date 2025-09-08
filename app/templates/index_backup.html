@@ -301,6 +301,11 @@
             background: #f9f9f9;
         }
         
+        .result-card.neutral {
+            border-left: 4px solid #6b7280;
+            background: #f9f9f9;
+        }
+        
         .result-label {
             font-weight: 600;
             font-size: 0.875rem;
@@ -644,7 +649,7 @@
             <!-- User Section -->
             <div class="user-section">
                 <!-- 로그인 전 -->
-                <div id="login-button" style="display: none;">
+                <div id="login-button">
                     <button class="button button-accent" onclick="showLoginModal()">🔐 로그인</button>
                 </div>
                 
@@ -669,44 +674,13 @@
         </div>
         
         <!-- Main Content -->
-        <div class="tabs">
-            <div class="tabs-list">
-                <button class="tabs-trigger active" onclick="switchTab('analyze')">
-                    📊 URL 크롤링
-                </button>
-                <button class="tabs-trigger" onclick="switchTab('cafe24')">
-                    🏪 카페24 리뷰
-                </button>
-                <button class="tabs-trigger" onclick="switchTab('monitor')">
-                    🔔 실시간 모니터링
-                </button>
-                <button class="tabs-trigger" onclick="switchTab('webhook')">
-                    🚀 채널톡 웹훅
-                </button>
-            </div>
-            
-            <!-- URL 크롤링 탭 -->
-            <div id="analyze-tab" class="tabs-content active">
-                <div class="card">
-                    <div class="card-header">
-                        <h3 class="card-title">URL 기반 리뷰 분석</h3>
-                    </div>
-                    <input type="url" id="analyze-url" class="input" placeholder="쇼핑몰 제품 URL을 입력하세요 (예: https://www.coupang.com/...)">
-                    <div class="supported-sites">
-                        지원 사이트: 쿠팡, 네이버 쇼핑, 11번가, G마켓, 옥션, 인터파크 등
-                    </div>
-                    <button class="button button-primary" onclick="analyzeURL()">리뷰 크롤링 및 분석</button>
-                </div>
-            </div>
-            
-            <!-- 카페24 리뷰 탭 -->
-            <div id="cafe24-tab" class="tabs-content">
+        <div>
                 <div class="card">
                     <div class="card-header">
                         <h3 class="card-title">카페24 API 인증</h3>
                     </div>
                     <div class="supported-sites">
-                        카페24 API를 통한 실제 쇼핑몰 리뷰 분석 (OAuth 인증 필요)
+                        카페24 API를 통한 실제 쇼핑몰 리뷰 분석 및 자동 부정리뷰 탐지 (OAuth 인증 필요)
                     </div>
                     
                     <!-- 인증 상태 -->
@@ -719,124 +693,57 @@
                     <!-- 카페24 기능들 -->
                     <div class="monitor-controls">
                         <button class="button button-accent" onclick="getLatestReviews()">📝 최신 리뷰 분석</button>
-                        <button class="button button-secondary" onclick="getReviewBoards()">📋 리뷰 게시판</button>
                         <button class="button button-secondary" onclick="getProducts()">📦 상품 목록</button>
-                    </div>
-                    
-                    <!-- 카페24 API 모니터링 -->
-                    <div class="card" style="border-left: 4px solid var(--destructive); background: #f9f9f9;">
-                        <div class="card-header">
-                            <h4 class="card-title" style="color: var(--destructive);">🚨 실시간 부정리뷰 모니터링</h4>
-                        </div>
-                        <div class="supported-sites">
-                            카페24 API를 통한 자동 부정리뷰 탐지 - 30분마다 새로운 댓글 확인
-                        </div>
-                        <div class="monitor-controls">
-                            <button class="button button-accent" onclick="startCafe24Monitoring()">🚀 카페24 모니터링 시작</button>
-                            <button class="button button-destructive" onclick="stopMonitoring()" disabled id="stop-cafe24-btn">⏹️ 모니터링 정지</button>
-                            <button class="button button-secondary" onclick="checkMonitoringStatus()">📊 모니터링 상태</button>
-                        </div>
-                        <div class="status-indicator" id="cafe24-monitor-status"></div>
-                    </div>
-                    
-                    <!-- 상품별 리뷰 조회 -->
-                    <div style="margin: 16px 0;">
-                        <input type="number" id="product-no" class="input" placeholder="상품번호 입력 (예: 39)" style="width: 200px; display: inline-block; margin-right: 8px;">
-                        <button class="button button-accent" onclick="getProductReviews()">🔍 상품별 리뷰</button>
-                    </div>
-                    
-                    <!-- 키워드 검색 -->
-                    <div style="margin: 16px 0;">
-                        <input type="text" id="search-keyword" class="input" placeholder="검색 키워드 입력 (예: 만족)" style="width: 200px; display: inline-block; margin-right: 8px;">
-                        <button class="button button-accent" onclick="searchReviews()">🔎 키워드 검색</button>
+                        <button class="button button-success" onclick="sendChannelTalkTest()">💬 채널톡 테스트 메시지</button>
                     </div>
                 </div>
-            </div>
-            
-            <!-- 실시간 모니터링 탭 -->
-            <div id="monitor-tab" class="tabs-content">
-                <div class="card">
+                
+                <!-- 카카오톡 알림 (재사용을 위해 주석처리) -->
+                <!--
+                <div class="card" style="margin-top: 16px;">
                     <div class="card-header">
-                        <h3 class="card-title">실시간 모니터링</h3>
+                        <h3 class="card-title">📱 카카오톡 알림</h3>
                     </div>
-                    <input type="url" id="monitor-url" class="input" placeholder="모니터링할 URL을 입력하세요 (예: https://dentistestore.kr/board/review/...)">
                     <div class="supported-sites">
-                        신규 리뷰 모니터링: 30분마다 새로운 리뷰 확인 및 알림
+                        웹훅으로 부정 리뷰 발견 시 자동 알림 전송
                     </div>
+                    
+                    <div class="status-indicator" id="kakao-status" style="text-align: center;">
+                        <span id="kakao-connection-status">🔄 연동 상태 확인중...</span>
+                    </div>
+                    
+                    <div class="status-indicator" id="monitor-status" style="margin: 16px 0; text-align: center; display: none;"></div>
+                    
                     <div class="monitor-controls">
-                        <button class="button button-accent" onclick="startMonitoring()">🚀 모니터링 시작</button>
-                        <button class="button button-destructive" onclick="stopMonitoring()" disabled>⏹️ 모니터링 정지</button>
-                        <button class="button button-secondary" onclick="checkStatus()">📊 상태 확인</button>
+                        <button class="button button-secondary" onclick="sendKakaoTestMessage()">🧪 테스트 메시지 전송</button>
+                        <button class="button button-outline" onclick="forceKakaoReauth()" style="margin-left: 8px;">🔄 카카오톡 재인증</button>
                     </div>
-                    <div class="status-indicator" id="monitor-status"></div>
                 </div>
-            </div>
-            
-            <!-- 채널톡 웹훅 탭 -->
-            <div id="webhook-tab" class="tabs-content">
-                <div class="card">
+                -->
+                
+                <!-- 채널톡 알림 -->
+                <div class="card" style="margin-top: 16px;">
                     <div class="card-header">
-                        <h3 class="card-title">채널톡 웹훅 설정</h3>
+                        <h3 class="card-title">💬 채널톡 알림</h3>
                     </div>
                     <div class="supported-sites">
-                        채널톡에서 리뷰나 메시지가 등록될 때 실시간으로 부정 리뷰를 감지합니다
+                        웹훅으로 부정 리뷰 발견 시 '🖤부정VOC' 그룹에 자동 알림 전송
                     </div>
                     
-                    <!-- 웹훅 상태 -->
-                    <div class="status-indicator" id="webhook-status">
-                        <div style="text-align: center;">
-                            <button class="button button-accent" onclick="checkWebhookStatus()">🔍 웹훅 상태 확인</button>
-                        </div>
+                    <!-- 채널톡 연동 상태 -->
+                    <div class="status-indicator" id="channel-talk-status" style="text-align: center;">
+                        <span id="channel-talk-connection-status">🔄 연동 상태 확인중...</span>
                     </div>
                     
-                    <!-- 웹훅 URL 정보 -->
-                    <div class="card" style="margin-top: 16px; background: #f9f9f9; border-left: 4px solid var(--accent);">
-                        <div class="card-header">
-                            <h4 class="card-title">📡 웹훅 엔드포인트 정보</h4>
-                        </div>
-                        <div style="font-family: monospace; font-size: 0.875rem; background: var(--muted); padding: 12px; border-radius: var(--radius); margin: 8px 0;">
-                            <strong>URL:</strong> <span id="webhook-url">loading...</span>
-                        </div>
-                        <div style="font-size: 0.75rem; color: var(--muted-foreground);">
-                            <strong>설정 방법:</strong><br>
-                            1. 채널톡 관리자 페이지 → 설정 → 개발자<br>
-                            2. 웹훅 URL에 위 URL 입력<br>
-                            3. 이벤트: review.created, message.created 선택<br>
-                            4. 헤더: X-Channel-Talk-Event-Key = <span id="event-key-display">loading...</span>
-                        </div>
-                    </div>
+                    <!-- 채널톡 메시지 상태 -->
+                    <div class="status-indicator" id="channel-talk-monitor-status" style="margin: 16px 0; text-align: center; display: none;"></div>
                     
-                    <!-- 웹훅 테스트 -->
-                    <div class="card" style="margin-top: 16px;">
-                        <div class="card-header">
-                            <h4 class="card-title">🧪 웹훅 테스트</h4>
-                        </div>
-                        <div style="margin-bottom: 12px;">
-                            <label for="test-review-content" style="display: block; margin-bottom: 8px; font-size: 0.875rem; font-weight: 500;">테스트 리뷰 내용</label>
-                            <textarea id="test-review-content" class="input" rows="3" placeholder="테스트할 리뷰 내용을 입력하세요 (부정적인 내용으로 테스트)">이 제품 정말 별로네요. 품질도 안좋고 배송도 늦어요. 완전 실망이에요.</textarea>
-                        </div>
-                        <div style="margin-bottom: 16px;">
-                            <label for="test-author" style="display: block; margin-bottom: 8px; font-size: 0.875rem; font-weight: 500;">작성자</label>
-                            <input type="text" id="test-author" class="input" placeholder="테스트 사용자" value="테스트 사용자">
-                        </div>
-                        <button class="button button-accent" onclick="testWebhook()">🚀 웹훅 테스트 실행</button>
-                    </div>
-                    
-                    <!-- 최근 웹훅 알림 -->
-                    <div class="card" style="margin-top: 16px;">
-                        <div class="card-header">
-                            <h4 class="card-title">📋 최근 웹훅 알림</h4>
-                        </div>
-                        <div id="recent-webhook-notifications">
-                            <p style="color: var(--muted-foreground); text-align: center; padding: 20px;">
-                                웹훅 상태를 확인해주세요
-                            </p>
-                        </div>
-                        <button class="button button-secondary" onclick="refreshWebhookNotifications()">🔄 새로고침</button>
+                    <!-- 테스트 버튼 -->
+                    <div class="monitor-controls">
+                        <button class="button button-secondary" onclick="sendChannelTalkTestMessage()">🧪 테스트 메시지 전송</button>
                     </div>
                 </div>
             </div>
-        </div>
         
         <!-- Loading indicator -->
         <div class="loading">
@@ -961,75 +868,10 @@
         window.addEventListener('load', function() {
             requestNotificationPermission();
             checkAuthStatus();
+            // checkKakaoConnectionStatus(); // 카카오톡 사용하지 않음
+            checkChannelTalkConnectionStatus(); // 채널톡 상태 확인
         });
         
-        function switchTab(tab) {
-            document.querySelectorAll('.tabs-trigger').forEach(btn => btn.classList.remove('active'));
-            document.querySelectorAll('.tabs-content').forEach(content => content.classList.remove('active'));
-            
-            if (tab === 'analyze') {
-                document.querySelector('.tabs-trigger:nth-child(1)').classList.add('active');
-                document.getElementById('analyze-tab').classList.add('active');
-            } else if (tab === 'cafe24') {
-                document.querySelector('.tabs-trigger:nth-child(2)').classList.add('active');
-                document.getElementById('cafe24-tab').classList.add('active');
-                checkAuthStatus();
-            } else if (tab === 'monitor') {
-                document.querySelector('.tabs-trigger:nth-child(3)').classList.add('active');
-                document.getElementById('monitor-tab').classList.add('active');
-                checkStatus();
-            } else if (tab === 'webhook') {
-                document.querySelector('.tabs-trigger:nth-child(4)').classList.add('active');
-                document.getElementById('webhook-tab').classList.add('active');
-                checkWebhookStatus();
-            }
-            
-            document.getElementById('results').style.display = 'none';
-            document.getElementById('error').style.display = 'none';
-        }
-        
-        async function startMonitoring() {
-            return requireAuth(() => {
-                const url = document.getElementById('monitor-url').value.trim();
-                if (!url) {
-                    showError('모니터링할 URL을 입력해주세요.');
-                    return;
-                }
-                
-                return performStartMonitoring(url);
-            });
-        }
-        
-        async function performStartMonitoring(url) {
-            showLoading(true);
-            hideError();
-            
-            try {
-                const response = await fetch('/start_monitoring', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ url })
-                });
-                
-                const data = await response.json();
-                
-                if (response.ok) {
-                    showMonitorStatus(data.message, 'success');
-                    document.querySelector('.button-accent').disabled = true;
-                    document.querySelector('.button-destructive').disabled = false;
-                    
-                    startNotificationPolling();
-                } else {
-                    showError(data.error || '모니터링 시작 중 오류가 발생했습니다.');
-                }
-            } catch (error) {
-                showError('서버 연결 오류: ' + error.message);
-            } finally {
-                showLoading(false);
-            }
-        }
         
         async function stopMonitoring() {
             showLoading(true);
@@ -1061,33 +903,17 @@
             }
         }
         
-        async function checkStatus() {
-            try {
-                const response = await fetch('/monitoring_status');
-                const data = await response.json();
-                
-                if (data.active) {
-                    showMonitorStatus(`🟢 모니터링 활성화\\nURL: ${data.url}\\n등록된 리뷰: ${data.known_reviews_count}개`, 'active');
-                    document.querySelector('.button-accent').disabled = true;
-                    document.querySelector('.button-destructive').disabled = false;
-                    
-                    if (!notificationInterval) {
-                        startNotificationPolling();
-                    }
-                } else {
-                    showMonitorStatus('🔴 모니터링 비활성화', 'inactive');
-                    document.querySelector('.button-accent').disabled = false;
-                    document.querySelector('.button-destructive').disabled = true;
-                }
-            } catch (error) {
-                showError('상태 확인 오류: ' + error.message);
-            }
-        }
         
         function showMonitorStatus(message, type, elementId = 'monitor-status') {
             const statusDiv = document.getElementById(elementId);
+            if (!statusDiv) {
+                console.error('Status element not found:', elementId);
+                return;
+            }
+            
             statusDiv.innerHTML = message.replace(/\\\\n/g, '<br>');
             statusDiv.className = 'status-indicator';
+            statusDiv.style.display = 'block';
             
             if (type === 'success' || type === 'active') {
                 statusDiv.classList.add('status-active');
@@ -1097,7 +923,14 @@
                 statusDiv.classList.add('status-inactive');
             }
             
-            statusDiv.style.display = 'block';
+            // 성공 메시지는 5초 후 자동 숨기기
+            if (type === 'success') {
+                setTimeout(() => {
+                    if (statusDiv) {
+                        statusDiv.style.display = 'none';
+                    }
+                }, 5000);
+            }
         }
         
         function showLoading(show) {
@@ -1259,120 +1092,7 @@
             }
         }
         
-        async function analyzeURL() {
-            return requireAuth(() => {
-                const url = document.getElementById('analyze-url').value.trim();
-                if (!url) {
-                    showError('URL을 입력해주세요.');
-                    return;
-                }
-                
-                return performAnalyzeURL(url);
-            });
-        }
         
-        async function performAnalyzeURL(url) {
-            if (!url.startsWith('http://') && !url.startsWith('https://')) {
-                showError('올바른 URL 형식을 입력해주세요. (http:// 또는 https://로 시작)');
-                return;
-            }
-            
-            showLoading(true);
-            hideError();
-            
-            try {
-                const response = await fetch('/crawl_and_analyze', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ url })
-                });
-                
-                const data = await response.json();
-                
-                if (response.ok) {
-                    displayURLResults(data);
-                } else {
-                    showError(data.error || '크롤링 중 오류가 발생했습니다.');
-                }
-            } catch (error) {
-                showError('서버 연결 오류: ' + error.message);
-            } finally {
-                showLoading(false);
-            }
-        }
-        
-        function displayURLResults(data) {
-            const resultsDiv = document.getElementById('results');
-            let html = '';
-            
-            // 제품 정보 표시
-            if (data.product) {
-                html += `
-                    <div class="card">
-                        <div class="card-title">📦 ${escapeHtml(data.product.title)}</div>
-                        ${data.product.price ? `<div style="color: var(--muted-foreground); font-weight: 600;">💰 ${escapeHtml(data.product.price)}원</div>` : ''}
-                    </div>
-                `;
-            }
-            
-            // 요약 통계
-            html += `
-                <div class="card">
-                    <div class="card-header">
-                        <h3 class="card-title">📊 리뷰 분석 결과</h3>
-                    </div>
-                    <div class="stats-grid">
-                        <div class="stat-item">
-                            <div class="stat-value">${data.summary.total}</div>
-                            <div class="stat-label">전체 리뷰</div>
-                        </div>
-                        <div class="stat-item">
-                            <div class="stat-value" style="color: var(--destructive);">${data.summary.negative}</div>
-                            <div class="stat-label">부정 리뷰</div>
-                        </div>
-                        <div class="stat-item">
-                            <div class="stat-value" style="color: var(--success);">${data.summary.positive}</div>
-                            <div class="stat-label">긍정 리뷰</div>
-                        </div>
-                        <div class="stat-item">
-                            <div class="stat-value">${data.summary.negative_ratio}%</div>
-                            <div class="stat-label">부정 비율</div>
-                        </div>
-                    </div>
-                </div>
-            `;
-            
-            // 주요 부정 리뷰
-            if (data.top_negative && data.top_negative.length > 0) {
-                html += '<h3 style="margin: 30px 0 15px;">⚠️ 주요 부정 리뷰</h3>';
-                data.top_negative.forEach(review => {
-                    html += `
-                        <div class="result-card negative">
-                            <div class="result-text">${escapeHtml(review.text)}</div>
-                            <div class="result-score">신뢰도: ${review.score}%</div>
-                        </div>
-                    `;
-                });
-            }
-            
-            // 주요 긍정 리뷰
-            if (data.top_positive && data.top_positive.length > 0) {
-                html += '<h3 style="margin: 30px 0 15px;">✅ 주요 긍정 리뷰</h3>';
-                data.top_positive.forEach(review => {
-                    html += `
-                        <div class="result-card positive">
-                            <div class="result-text">${escapeHtml(review.text)}</div>
-                            <div class="result-score">신뢰도: ${review.score}%</div>
-                        </div>
-                    `;
-                });
-            }
-            
-            resultsDiv.innerHTML = html;
-            resultsDiv.style.display = 'block';
-        }
         
         // 텍스트 펼치기/접기 함수
         function createExpandableText(text, maxLength = 100) {
@@ -1454,69 +1174,21 @@
         
         // ===== 카페24 API 함수들 =====
         
-        async function startCafe24Monitoring() {
-            return requireAuth(() => {
-                return performStartCafe24Monitoring();
-            });
-        }
         
-        async function performStartCafe24Monitoring() {
-            showLoading(true);
-            hideError();
-            
-            try {
-                const response = await fetch('/start_cafe24_monitoring', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({})
-                });
-                
-                const data = await response.json();
-                
-                if (response.ok) {
-                    showMonitorStatus(data.message, 'success', 'cafe24-monitor-status');
-                    document.getElementById('stop-cafe24-btn').disabled = false;
-                    
-                    startNotificationPolling();
-                } else {
-                    showError(data.error || '카페24 모니터링 시작 중 오류가 발생했습니다.');
-                }
-            } catch (error) {
-                showError('서버 연결 오류: ' + error.message);
-            } finally {
-                showLoading(false);
-            }
-        }
-        
-        async function checkMonitoringStatus() {
-            try {
-                const response = await fetch('/monitoring_status');
-                const data = await response.json();
-                
-                if (data.active) {
-                    const statusText = data.url === "CAFE24_API" ? 
-                        `🟢 카페24 API 모니터링 활성화\\n등록된 리뷰: ${data.known_reviews_count}개` :
-                        `🟢 URL 모니터링 활성화\\nURL: ${data.url}\\n등록된 리뷰: ${data.known_reviews_count}개`;
-                    
-                    showMonitorStatus(statusText, 'active', 'cafe24-monitor-status');
-                    document.getElementById('stop-cafe24-btn').disabled = false;
-                    
-                    if (!notificationInterval) {
-                        startNotificationPolling();
-                    }
-                } else {
-                    showMonitorStatus('🔴 모니터링 비활성화', 'inactive', 'cafe24-monitor-status');
-                    document.getElementById('stop-cafe24-btn').disabled = true;
-                }
-            } catch (error) {
-                showError('상태 확인 오류: ' + error.message);
-            }
-        }
         
         async function checkAuthStatus() {
             try {
+                // 사용자 로그인 상태 확인
+                const userResponse = await fetch('/user/status');
+                const userData = await userResponse.json();
+                
+                if (userData.authenticated) {
+                    showUserInfo(userData.user);
+                } else {
+                    showLoginButton();
+                }
+                
+                // 카페24 API 토큰 상태 확인
                 const response = await fetch('/auth/status');
                 const data = await response.json();
                 
@@ -1554,30 +1226,257 @@
                 const data = await response.json();
                 
                 if (response.ok) {
-                    window.open(data.auth_url, '_blank', 'width=600,height=700');
+                    const popup = window.open(data.auth_url, 'cafe24_auth', 'width=600,height=700,scrollbars=yes,resizable=yes');
                     
                     const checkInterval = setInterval(async () => {
-                        const statusResponse = await fetch('/auth/status');
-                        const statusData = await statusResponse.json();
-                        
-                        if (statusData.authenticated && statusData.token_valid) {
-                            clearInterval(checkInterval);
-                            checkAuthStatus();
-                            showMonitorStatus('🎉 OAuth 인증이 완료되었습니다!', 'success');
+                        try {
+                            // 팝업이 닫혔는지 확인
+                            if (popup.closed) {
+                                clearInterval(checkInterval);
+                                // 인증 상태 재확인
+                                checkAuthStatus();
+                                return;
+                            }
+                            
+                            // 인증 상태 확인
+                            const statusResponse = await fetch('/auth/status');
+                            const statusData = await statusResponse.json();
+                            
+                            if (statusData.authenticated && statusData.token_valid) {
+                                clearInterval(checkInterval);
+                                popup.close();
+                                checkAuthStatus();
+                                showMonitorStatus('🎉 OAuth 인증이 완료되었습니다!', 'success');
+                            }
+                        } catch (error) {
+                            // 팝업 접근 오류는 무시
                         }
-                    }, 5000);
+                    }, 2000);
                     
                     setTimeout(() => {
                         clearInterval(checkInterval);
-                    }, 30000);
+                        if (!popup.closed) {
+                            popup.close();
+                        }
+                    }, 60000);
                     
-                    showMonitorStatus('브라우저에서 OAuth 인증을 진행해주세요...', 'info');
+                    showMonitorStatus('팝업에서 OAuth 인증을 진행해주세요...', 'info');
                 } else {
                     showError(data.error || 'OAuth 시작 오류');
                 }
             } catch (error) {
                 showError('OAuth 시작 오류: ' + error.message);
             }
+        }
+        
+        // ===== 카카오톡 알림 함수들 (재사용을 위해 주석처리) =====
+        /*
+        
+        async function checkKakaoConnectionStatus() {
+            try {
+                const response = await fetch('/auth/kakao/status');
+                const data = await response.json();
+                
+                const statusSpan = document.getElementById('kakao-connection-status');
+                const statusDiv = document.getElementById('kakao-status');
+                
+                if (data.api_key_configured && data.access_token_available) {
+                    statusSpan.textContent = '🟢 카카오톡 연동 ON';
+                    statusSpan.style.color = 'var(--success)';
+                    statusDiv.className = 'status-indicator status-active';
+                } else if (data.api_key_configured && !data.access_token_available) {
+                    statusSpan.textContent = '🟡 카카오톡 설정됨 (토큰 필요)';
+                    statusSpan.style.color = 'var(--warning)';
+                    statusDiv.className = 'status-indicator';
+                } else {
+                    statusSpan.textContent = '🔴 카카오톡 연동 OFF';
+                    statusSpan.style.color = 'var(--destructive)';
+                    statusDiv.className = 'status-indicator status-inactive';
+                }
+            } catch (error) {
+                const statusSpan = document.getElementById('kakao-connection-status');
+                statusSpan.textContent = '❌ 상태 확인 실패';
+                statusSpan.style.color = 'var(--destructive)';
+            }
+        }
+        
+        async function startKakaoAuth() {
+            try {
+                const response = await fetch('/auth/kakao/start');
+                const data = await response.json();
+                
+                if (response.ok) {
+                    // 팝업 창에서 인증 진행
+                    const popup = window.open(data.auth_url, 'kakao_auth', 'width=600,height=700,scrollbars=yes,resizable=yes');
+                    
+                    // 팝업 창 상태 모니터링
+                    const checkInterval = setInterval(async () => {
+                        try {
+                            // 팝업이 닫혔는지 확인
+                            if (popup.closed) {
+                                clearInterval(checkInterval);
+                                // 인증 상태 재확인
+                                checkKakaoConnectionStatus();
+                                
+                                // 인증 완료 확인
+                                const statusResponse = await fetch('/auth/kakao/status');
+                                const statusData = await statusResponse.json();
+                                
+                                if (statusData.authenticated) {
+                                    showMonitorStatus('🎉 카카오톡 인증이 완료되었습니다!', 'success');
+                                    hideError(); // 인증 성공 시 에러 메시지 숨김
+                                    checkKakaoConnectionStatus(); // 연동 상태 업데이트
+                                } else {
+                                    showError('카카오톡 인증이 완료되지 않았습니다. 다시 시도해주세요.');
+                                }
+                                return;
+                            }
+                        } catch (error) {
+                            // 팝업 접근 오류는 무시 (크로스 오리진)
+                        }
+                    }, 1000);
+                    
+                    // 30초 후 자동 정리
+                    setTimeout(() => {
+                        clearInterval(checkInterval);
+                        if (!popup.closed) {
+                            popup.close();
+                        }
+                    }, 30000);
+                    
+                    showMonitorStatus('팝업에서 카카오톡 인증을 진행해주세요...', 'info');
+                } else {
+                    showError(data.error || '카카오톡 인증 시작 오류');
+                }
+            } catch (error) {
+                showError('카카오톡 인증 시작 오류: ' + error.message);
+            }
+        }
+        
+        function forceKakaoReauth() {
+            showMonitorStatus('카카오톡 재인증을 시작합니다...', 'info');
+            startKakaoAuth();
+        }
+        
+        async function sendKakaoTestMessage() {
+            try {
+                // 먼저 카카오톡 연동 상태 확인
+                const statusResponse = await fetch('/auth/kakao/status');
+                const statusData = await statusResponse.json();
+                
+                if (!statusData.api_key_configured) {
+                    showError('카카오 API 키가 설정되지 않았습니다.');
+                    return;
+                }
+                
+                if (!statusData.access_token_available) {
+                    // 토큰이 없으면 자동으로 인증 시작
+                    showMonitorStatus('카카오톡 인증을 시작합니다...', 'info');
+                    startKakaoAuth();
+                    return;
+                }
+                
+                // 연동 상태가 정상이면 메시지 전송
+                const response = await fetch('/test/kakao-notification', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        message: '테스트 메시지입니다. 카카오톡 알림이 정상적으로 작동하고 있습니다! 🎉'
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showMonitorStatus('📱 카카오톡 테스트 메시지가 전송되었습니다!', 'success');
+                    hideError(); // 성공 시 에러 메시지 숨김
+                } else {
+                    showError(data.error || '카카오톡 메시지 전송 오류');
+                }
+            } catch (error) {
+                showError('카카오톡 메시지 전송 오류: ' + error.message);
+            }
+        }
+        */
+        
+        // ===== 채널톡 알림 함수들 =====
+        
+        async function checkChannelTalkConnectionStatus() {
+            try {
+                const response = await fetch('/auth/channel-talk/status');
+                const data = await response.json();
+                const statusSpan = document.getElementById('channel-talk-connection-status');
+                const statusDiv = document.getElementById('channel-talk-status');
+                
+                if (data.authenticated) {
+                    statusSpan.textContent = '🟢 채널톡 연동 ON';
+                    statusSpan.style.color = 'var(--success)';
+                    statusDiv.className = 'status-indicator status-active';
+                } else {
+                    statusSpan.textContent = '🔴 채널톡 연동 OFF';
+                    statusSpan.style.color = 'var(--destructive)';
+                    statusDiv.className = 'status-indicator status-inactive';
+                }
+            } catch (error) {
+                const statusSpan = document.getElementById('channel-talk-connection-status');
+                const statusDiv = document.getElementById('channel-talk-status');
+                statusSpan.textContent = '❌ 연동 상태 확인 실패';
+                statusSpan.style.color = 'var(--destructive)';
+                statusDiv.className = 'status-indicator status-inactive';
+                console.error('채널톡 상태 확인 오류:', error);
+            }
+        }
+        
+        async function sendChannelTalkTestMessage() {
+            try {
+                // 먼저 채널톡 연동 상태 확인
+                const statusResponse = await fetch('/auth/channel-talk/status');
+                const statusData = await statusResponse.json();
+                
+                if (!statusData.authenticated) {
+                    showError('채널톡 인증이 필요합니다. API 토큰과 시크릿을 확인해주세요.');
+                    return;
+                }
+                
+                // 연동 상태가 정상이면 메시지 전송
+                const response = await fetch('/test/channel-talk-notification', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        message: '테스트 메시지입니다. 채널톡 알림이 정상적으로 작동하고 있습니다! 🎉'
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showChannelTalkMonitorStatus('💬 채널톡 테스트 메시지가 전송되었습니다!', 'success');
+                    hideError(); // 성공 시 에러 메시지 숨김
+                } else {
+                    showError(data.error || '채널톡 메시지 전송 오류');
+                }
+            } catch (error) {
+                showError('채널톡 메시지 전송 오류: ' + error.message);
+            }
+        }
+        
+        function showChannelTalkMonitorStatus(message, type) {
+            const statusDiv = document.getElementById('channel-talk-monitor-status');
+            statusDiv.textContent = message;
+            statusDiv.style.display = 'block';
+            
+            statusDiv.className = `status-indicator ${type === 'success' ? 'status-active' : 'status-inactive'}`;
+            statusDiv.style.color = type === 'success' ? 'var(--success)' : 
+                                   type === 'warning' ? 'var(--warning)' : 'var(--info)';
+            
+            // 5초 후 자동 숨김
+            setTimeout(() => {
+                statusDiv.style.display = 'none';
+            }, 5000);
         }
         
         async function getLatestReviews() {
@@ -1591,7 +1490,9 @@
             hideError();
             
             try {
-                const response = await fetch('/api/reviews/latest?limit=10');
+                const response = await fetch('/api/reviews/latest?limit=10', {
+                    credentials: 'include'
+                });
                 const data = await response.json();
                 
                 if (response.ok) {
@@ -1606,29 +1507,6 @@
             }
         }
         
-        async function getReviewBoards() {
-            return requireAuth(() => performGetReviewBoards());
-        }
-        
-        async function performGetReviewBoards() {
-            showLoading(true);
-            hideError();
-            
-            try {
-                const response = await fetch('/api/reviews/boards');
-                const data = await response.json();
-                
-                if (response.ok) {
-                    displayBoardsResults(data);
-                } else {
-                    showError(data.error || '게시판 조회 오류');
-                }
-            } catch (error) {
-                showError('서버 연결 오류: ' + error.message);
-            } finally {
-                showLoading(false);
-            }
-        }
         
         async function getProducts() {
             return requireAuth(() => performGetProducts());
@@ -1654,49 +1532,11 @@
             }
         }
         
-        async function getProductReviews() {
-            return requireAuth(() => {
-                const productNo = document.getElementById('product-no').value.trim();
-                if (!productNo) {
-                    showError('상품번호를 입력해주세요.');
-                    return;
-                }
-                
-                return performGetProductReviews(productNo);
-            });
+        // 채널톡 테스트 메시지 전송 (기존 엔드포인트 사용)
+        async function sendChannelTalkTest() {
+            await testChannelTalkNotification();
         }
         
-        async function performGetProductReviews(productNo) {
-            showLoading(true);
-            hideError();
-            
-            try {
-                const response = await fetch(`/api/reviews/product/${productNo}?limit=10`);
-                const data = await response.json();
-                
-                if (response.ok) {
-                    displayCafe24Results(data, `🔍 상품 ${productNo}번 리뷰 분석 결과`);
-                } else {
-                    showError(data.error || '상품 리뷰 조회 오류');
-                }
-            } catch (error) {
-                showError('서버 연결 오류: ' + error.message);
-            } finally {
-                showLoading(false);
-            }
-        }
-        
-        async function searchReviews() {
-            return requireAuth(() => {
-                const keyword = document.getElementById('search-keyword').value.trim();
-                if (!keyword) {
-                    showError('검색 키워드를 입력해주세요.');
-                    return;
-                }
-                
-                return performSearchReviews(keyword);
-            });
-        }
         
         async function performSearchReviews(keyword) {
             showLoading(true);
@@ -1757,7 +1597,7 @@
                 data.negative_reviews.forEach(review => {
                     html += `
                         <div class="result-card negative">
-                            <div class="result-label">🚨 부정 리뷰 (신뢰도: ${review.score}%)<br><strong>${escapeHtml(review.title || '')}</strong></div>
+                            <div class="result-label">🚨 부정 리뷰<br><strong>${escapeHtml(review.title || '')}</strong></div>
                             <div class="result-text">${createExpandableText(review.content || '', 100)}</div>
                             <div class="result-score">
                                 작성자: ${escapeHtml(review.writer || 'unknown')} | 
@@ -1788,7 +1628,11 @@
                                 </label>
                                 <label class="filter-label">
                                     <input type="radio" name="${reviewId}" value="positive" onchange="filterReviews('${reviewId}', 'positive')">
-                                    긍정 (${data.reviews.filter(r => !r.is_negative).length}개)
+                                    긍정 (${data.reviews.filter(r => r.is_positive).length}개)
+                                </label>
+                                <label class="filter-label">
+                                    <input type="radio" name="${reviewId}" value="neutral" onchange="filterReviews('${reviewId}', 'neutral')">
+                                    보통 (${data.reviews.filter(r => r.is_neutral).length}개)
                                 </label>
                             </div>
                         </div>
@@ -1797,12 +1641,28 @@
                 
                 // 모든 리뷰 렌더링 (처음 10개만)
                 data.reviews.slice(0, 10).forEach(review => {
-                    const cardClass = review.is_negative ? 'negative' : 'positive';
-                    const label = review.is_negative ? '부정' : '긍정';
-                    const filterClass = review.is_negative ? 'review-negative' : 'review-positive';
+                    let cardClass, label, filterClass, reviewType;
+                    
+                    if (review.is_negative) {
+                        cardClass = 'negative';
+                        label = '부정';
+                        filterClass = 'review-negative';
+                        reviewType = 'negative';
+                    } else if (review.is_positive) {
+                        cardClass = 'positive';
+                        label = '긍정';
+                        filterClass = 'review-positive';
+                        reviewType = 'positive';
+                    } else {
+                        cardClass = 'neutral';
+                        label = '보통';
+                        filterClass = 'review-neutral';
+                        reviewType = 'neutral';
+                    }
+                    
                     html += `
-                        <div class="result-card ${cardClass} ${filterClass}" data-review-type="${review.is_negative ? 'negative' : 'positive'}">
-                            <div class="result-label">${label} (${review.score}%)<br><strong>${escapeHtml(review.title || '')}</strong></div>
+                        <div class="result-card ${cardClass} ${filterClass}" data-review-type="${reviewType}">
+                            <div class="result-label">${label}<br><strong>${escapeHtml(review.title || '')}</strong></div>
                             <div class="result-text">${createExpandableText(review.content || '', 100)}</div>
                             <div class="result-score">
                                 작성자: ${escapeHtml(review.writer || 'unknown')} | 
@@ -1820,31 +1680,6 @@
             resultsDiv.style.display = 'block';
         }
         
-        function displayBoardsResults(data) {
-            const resultsDiv = document.getElementById('results');
-            let html = '<div class="card"><h2 class="card-title">📋 리뷰 게시판 목록</h2></div>';
-            
-            if (data.boards && data.boards.length > 0) {
-                data.boards.forEach(board => {
-                    html += `
-                        <div class="result-card">
-                            <div class="result-label">${escapeHtml(board.board_name)} (번호: ${board.board_no})</div>
-                            <div class="result-text">${escapeHtml(board.board_guide || '설명 없음')}</div>
-                            <div class="result-score">
-                                게시판 타입: ${board.board_type} | 
-                                페이지당 표시: ${board.page_display_count}개 |
-                                댓글 기능: ${board.use_comment === 'T' ? '사용' : '미사용'}
-                            </div>
-                        </div>
-                    `;
-                });
-            } else {
-                html += '<div class="card"><p>리뷰 게시판을 찾을 수 없습니다.</p></div>';
-            }
-            
-            resultsDiv.innerHTML = html;
-            resultsDiv.style.display = 'block';
-        }
         
         function displayProductsResults(data) {
             const resultsDiv = document.getElementById('results');
@@ -1858,11 +1693,11 @@
                             <div class="result-text">
                                 상품번호: ${product.product_no} | 
                                 상품코드: ${product.product_code} | 
-                                가격: ${product.price}원
+                                가격: ${Math.floor(parseFloat(product.price))}원
                             </div>
                             <div class="result-score">
                                 노출상태: ${product.display === 'T' ? '노출' : '숨김'}
-                                <button class="button button-accent" onclick="document.getElementById('product-no').value='${product.product_no}'; switchTab('cafe24');" style="margin-left: 8px; padding: 4px 8px; font-size: 0.75rem;">이 상품 리뷰 보기</button>
+                                <button class="button button-accent" onclick="document.getElementById('product-no').value='${product.product_no}'; getProductReviews();" style="margin-left: 8px; padding: 4px 8px; font-size: 0.75rem;">이 상품 리뷰 보기</button>
                             </div>
                         </div>
                     `;
@@ -1875,209 +1710,6 @@
             resultsDiv.style.display = 'block';
         }
         
-        // ===== 채널톡 웹훅 함수들 =====
-        
-        async function checkWebhookStatus() {
-            return requireAuth(() => performCheckWebhookStatus());
-        }
-        
-        async function performCheckWebhookStatus() {
-            try {
-                const response = await fetch('/webhook/status');
-                const data = await response.json();
-                
-                if (response.ok) {
-                    displayWebhookStatus(data);
-                } else {
-                    showError(data.error || '웹훅 상태 확인 오류');
-                }
-            } catch (error) {
-                showError('서버 연결 오류: ' + error.message);
-            }
-        }
-        
-        function displayWebhookStatus(data) {
-            const statusDiv = document.getElementById('webhook-status');
-            const urlSpan = document.getElementById('webhook-url');
-            const eventKeySpan = document.getElementById('event-key-display');
-            
-            // 웹훅 URL 표시
-            if (urlSpan) {
-                urlSpan.textContent = data.endpoint || 'URL을 가져올 수 없습니다';
-            }
-            
-            // 이벤트 키 표시
-            if (eventKeySpan) {
-                eventKeySpan.textContent = data.event_key_value || 'Not configured';
-                eventKeySpan.style.fontWeight = 'bold';
-                eventKeySpan.style.color = data.event_key_configured ? 'var(--success)' : 'var(--destructive)';
-            }
-            
-            // 상태 표시
-            if (data.enabled && data.event_key_configured) {
-                statusDiv.innerHTML = `
-                    <div style="color: var(--success); text-align: center;">
-                        ✅ 웹훅 활성화됨<br>
-                        <small>이벤트 키: 설정됨</small><br>
-                        <small>엔드포인트: 준비됨</small>
-                    </div>
-                `;
-                statusDiv.className = 'status-indicator status-active';
-            } else if (data.enabled && !data.event_key_configured) {
-                statusDiv.innerHTML = `
-                    <div style="color: var(--accent); text-align: center;">
-                        ⚠️ 웹훅 부분 활성화<br>
-                        <small>환경변수 WEBHOOK_EVENT_KEY 설정 필요</small>
-                    </div>
-                `;
-                statusDiv.className = 'status-indicator';
-            } else {
-                statusDiv.innerHTML = `
-                    <div style="color: var(--destructive); text-align: center;">
-                        ❌ 웹훅 비활성화<br>
-                        <small>서버 설정 확인 필요</small>
-                    </div>
-                `;
-                statusDiv.className = 'status-indicator status-inactive';
-            }
-            
-            // 최근 알림 표시
-            displayRecentWebhookNotifications(data.recent_notifications || []);
-        }
-        
-        async function testWebhook() {
-            return requireAuth(() => performTestWebhook());
-        }
-        
-        async function performTestWebhook() {
-            const content = document.getElementById('test-review-content').value.trim();
-            const author = document.getElementById('test-author').value.trim();
-            
-            if (!content) {
-                showError('테스트 리뷰 내용을 입력해주세요.');
-                return;
-            }
-            
-            showLoading(true);
-            hideError();
-            
-            try {
-                const response = await fetch('/webhook/test', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        content: content,
-                        author: author || '테스트 사용자'
-                    })
-                });
-                
-                const data = await response.json();
-                
-                if (response.ok) {
-                    showMonitorStatus(
-                        `🧪 웹훅 테스트 완료!\\n처리됨: ${data.processed ? '예' : '아니오'}\\n${data.message}`, 
-                        'success', 
-                        'webhook-status'
-                    );
-                    
-                    // 최근 알림 새로고침
-                    setTimeout(() => {
-                        refreshWebhookNotifications();
-                    }, 1000);
-                } else {
-                    showError(data.error || '웹훅 테스트 오류');
-                }
-            } catch (error) {
-                showError('서버 연결 오류: ' + error.message);
-            } finally {
-                showLoading(false);
-            }
-        }
-        
-        async function refreshWebhookNotifications() {
-            try {
-                const response = await fetch('/notifications/recent?limit=10');
-                const data = await response.json();
-                
-                if (response.ok) {
-                    displayRecentWebhookNotifications(data.notifications || []);
-                } else {
-                    showError(data.error || '알림 새로고침 오류');
-                }
-            } catch (error) {
-                console.error('알림 새로고침 오류:', error);
-            }
-        }
-        
-        function displayRecentWebhookNotifications(notifications) {
-            const notificationsDiv = document.getElementById('recent-webhook-notifications');
-            
-            if (!notifications || notifications.length === 0) {
-                notificationsDiv.innerHTML = `
-                    <p style="color: var(--muted-foreground); text-align: center; padding: 20px;">
-                        최근 웹훅 알림이 없습니다
-                    </p>
-                `;
-                return;
-            }
-            
-            // 웹훅 관련 알림만 필터링
-            const webhookNotifications = notifications.filter(n => 
-                n.type && (n.type.includes('webhook') || n.type.includes('negative') || n.type.includes('urgent'))
-            );
-            
-            if (webhookNotifications.length === 0) {
-                notificationsDiv.innerHTML = `
-                    <p style="color: var(--muted-foreground); text-align: center; padding: 20px;">
-                        웹훅 관련 알림이 없습니다
-                    </p>
-                `;
-                return;
-            }
-            
-            let html = '';
-            webhookNotifications.slice(0, 5).forEach((notification, index) => {
-                const isUrgent = notification.type.includes('urgent') || notification.type.includes('negative');
-                const cardClass = isUrgent ? 'result-card negative' : 'result-card';
-                const timeAgo = formatTimeAgo(notification.created_at || notification.timestamp);
-                
-                html += `
-                    <div class="${cardClass}" style="margin-bottom: 12px;">
-                        <div class="result-label">
-                            ${isUrgent ? '🚨' : '📢'} ${notification.type}
-                        </div>
-                        <div class="result-text">${escapeHtml(notification.message)}</div>
-                        <div class="result-score">
-                            ${timeAgo} | 타입: ${notification.notification_type || notification.type}
-                        </div>
-                    </div>
-                `;
-            });
-            
-            notificationsDiv.innerHTML = html;
-        }
-        
-        function formatTimeAgo(timestamp) {
-            if (!timestamp) return 'N/A';
-            
-            try {
-                const date = new Date(timestamp);
-                const now = new Date();
-                const diffMs = now - date;
-                const diffMins = Math.floor(diffMs / 60000);
-                const diffHours = Math.floor(diffMins / 60);
-                const diffDays = Math.floor(diffHours / 24);
-                
-                if (diffMins < 1) return '방금 전';
-                if (diffMins < 60) return `${diffMins}분 전`;
-                if (diffHours < 24) return `${diffHours}시간 전`;
-                return `${diffDays}일 전`;
-            } catch (error) {
-                return 'N/A';
-            }
-        }
     </script>
 </body>
 </html>

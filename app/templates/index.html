@@ -1,0 +1,1580 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>부정댓글 탐지기</title>
+    <style>
+        :root {
+            --background: #ffffff;
+            --foreground: #000000;
+            --card: #fafafa;
+            --card-foreground: #000000;
+            --primary: #000000;
+            --primary-foreground: #ffffff;
+            --secondary: #808080;
+            --secondary-foreground: #ffffff;
+            --muted: #f5f5f5;
+            --muted-foreground: #808080;
+            --accent: #6b7280;
+            --accent-foreground: #ffffff;
+            --destructive: #9f9f9f;
+            --destructive-foreground: #ffffff;
+            --success: #a3a3a3;
+            --success-foreground: #ffffff;
+            --border: #e5e5e5;
+            --input: #ffffff;
+            --ring: #6b7280;
+            --radius: 0.5rem;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: var(--background);
+            color: var(--foreground);
+            min-height: 100vh;
+            margin: 0;
+            padding: 0;
+            line-height: 1.6;
+        }
+        
+        /* Top Header Bar */
+        .top-header {
+            background: var(--card);
+            border-bottom: 2px solid var(--border);
+            padding: 12px 24px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        
+        .top-header-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: var(--foreground);
+            text-decoration: none;
+        }
+        
+        .logo:hover {
+            color: var(--accent);
+        }
+        
+        .user-section {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 24px;
+            space-y: 32px;
+        }
+        
+        /* Header */
+        .header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+        
+        .title {
+            font-size: 2.25rem;
+            font-weight: 700;
+            color: var(--foreground);
+            margin-bottom: 16px;
+            letter-spacing: -0.025em;
+        }
+        
+        .subtitle {
+            font-size: 1.125rem;
+            color: var(--muted-foreground);
+            max-width: 512px;
+            margin: 0 auto;
+        }
+        
+        /* Card styles */
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 24px;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+        
+        .card-header {
+            margin-bottom: 16px;
+        }
+        
+        .card-title {
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: var(--card-foreground);
+        }
+        
+        /* Tabs */
+        .tabs {
+            margin-bottom: 24px;
+        }
+        
+        .tabs-list {
+            display: flex;
+            background: var(--muted);
+            border-radius: var(--radius);
+            padding: 4px;
+            gap: 4px;
+            margin-bottom: 24px;
+        }
+        
+        .tabs-trigger {
+            display: flex;
+            align-items: center;
+            padding: 12px 16px;
+            background: transparent;
+            border: none;
+            border-radius: calc(var(--radius) - 2px);
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--muted-foreground);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            flex: 1;
+            justify-content: center;
+            gap: 8px;
+        }
+        
+        .tabs-trigger:hover {
+            background: var(--background);
+            color: var(--foreground);
+        }
+        
+        .tabs-trigger.active {
+            background: var(--background);
+            color: var(--foreground);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+        
+        .tabs-content {
+            display: none;
+        }
+        
+        .tabs-content.active {
+            display: block;
+        }
+        
+        /* Input styles */
+        .input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            background: var(--input);
+            color: var(--foreground);
+            font-size: 0.875rem;
+            transition: all 0.2s ease;
+            margin-bottom: 12px;
+        }
+        
+        .input:focus {
+            outline: none;
+            border-color: var(--ring);
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+        }
+        
+        /* Button styles */
+        .button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 12px 24px;
+            border-radius: var(--radius);
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: none;
+            gap: 8px;
+            text-decoration: none;
+        }
+        
+        .button-primary {
+            background: var(--primary);
+            color: var(--primary-foreground);
+        }
+        
+        .button-primary:hover {
+            background: #1a1a1a;
+        }
+        
+        .button-secondary {
+            background: var(--secondary);
+            color: var(--secondary-foreground);
+        }
+        
+        .button-secondary:hover {
+            background: #696969;
+        }
+        
+        .button-accent {
+            background: var(--accent);
+            color: var(--accent-foreground);
+        }
+        
+        .button-accent:hover {
+            background: #2563eb;
+        }
+        
+        .button-destructive {
+            background: var(--destructive);
+            color: var(--destructive-foreground);
+        }
+        
+        .button-destructive:hover {
+            background: #dc2626;
+        }
+        
+        .button:disabled {
+            background: var(--muted);
+            color: var(--muted-foreground);
+            cursor: not-allowed;
+        }
+        
+        /* Badge styles */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 8px;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+        
+        .badge-destructive {
+            background: #f9f9f9;
+            color: var(--destructive);
+            border: 1px solid #d4d4d4;
+        }
+        
+        .badge-success {
+            background: #f9f9f9;
+            color: var(--success);
+            border: 1px solid #d4d4d4;
+        }
+        
+        /* Result card styles */
+        .result-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px;
+            margin-bottom: 12px;
+            transition: all 0.2s ease;
+        }
+        
+        .result-card:hover {
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        .result-card.negative {
+            border-left: 4px solid var(--destructive);
+            background: #f9f9f9;
+        }
+        
+        .result-card.positive {
+            border-left: 4px solid var(--success);
+            background: #f9f9f9;
+        }
+        
+        .result-card.neutral {
+            border-left: 4px solid #6b7280;
+            background: #f9f9f9;
+        }
+        
+        .result-label {
+            font-weight: 600;
+            font-size: 0.875rem;
+            margin-bottom: 8px;
+        }
+        
+        .result-text {
+            color: var(--muted-foreground);
+            margin-bottom: 8px;
+            line-height: 1.5;
+        }
+        
+        .result-score {
+            font-size: 0.75rem;
+            color: var(--muted-foreground);
+        }
+        
+        /* Statistics */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 16px;
+            margin: 16px 0;
+        }
+        
+        .stat-item {
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--foreground);
+        }
+        
+        .stat-label {
+            font-size: 0.75rem;
+            color: var(--muted-foreground);
+            margin-top: 4px;
+        }
+        
+        /* Loading spinner */
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 32px;
+        }
+        
+        .spinner {
+            border: 2px solid var(--muted);
+            border-top: 2px solid var(--accent);
+            border-radius: 50%;
+            width: 32px;
+            height: 32px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 16px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* Error styles */
+        .error {
+            background: #f9f9f9;
+            color: var(--destructive);
+            padding: 16px;
+            border-radius: var(--radius);
+            border: 1px solid #d4d4d4;
+            margin: 16px 0;
+            display: none;
+        }
+        
+        /* Monitor controls */
+        .monitor-controls {
+            display: flex;
+            gap: 8px;
+            margin: 16px 0;
+            flex-wrap: wrap;
+        }
+        
+        /* Supported sites */
+        .supported-sites {
+            font-size: 0.75rem;
+            color: var(--muted-foreground);
+            margin: 8px 0 16px 0;
+        }
+        
+        /* User info styles */
+        .user-info {
+            position: absolute;
+            top: 24px;
+            right: 24px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 8px 16px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        
+        .user-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            border: 1px solid var(--border);
+        }
+        
+        .user-details {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        
+        .user-name {
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--foreground);
+        }
+        
+        .user-email {
+            font-size: 0.75rem;
+            color: var(--muted-foreground);
+        }
+        
+        .login-prompt {
+            text-align: center;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+        
+        
+        /* User info in header */
+        .user-info-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 8px 12px;
+            background: var(--muted);
+            border-radius: var(--radius);
+        }
+        
+        .user-avatar-small {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            border: 1px solid var(--border);
+        }
+        
+        .user-details-small {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+        }
+        
+        .user-name-small {
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: var(--foreground);
+        }
+        
+        .user-email-small {
+            font-size: 0.6875rem;
+            color: var(--muted-foreground);
+        }
+        
+        /* Modal styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+        
+        .modal-content {
+            background: var(--card);
+            margin: 15% auto;
+            padding: 24px;
+            border-radius: var(--radius);
+            width: 400px;
+            max-width: 90%;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        
+        .modal-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--foreground);
+        }
+        
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: var(--muted-foreground);
+            padding: 0;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal-close:hover {
+            color: var(--foreground);
+        }
+        
+        /* Status indicator */
+        .status-indicator {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px;
+            margin-top: 16px;
+            display: none;
+        }
+        
+        .status-active {
+            border-left: 4px solid var(--success);
+            background: #f9f9f9;
+        }
+        
+        .status-inactive {
+            border-left: 4px solid var(--destructive);
+            background: #f9f9f9;
+        }
+        
+        /* Filter controls */
+        .filter-controls {
+            margin: 16px 0;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        
+        .filter-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.875rem;
+            cursor: pointer;
+        }
+        
+        .filter-label input[type="radio"] {
+            margin: 0;
+        }
+        
+        /* Expandable text styles */
+        .expandable-text {
+            cursor: pointer;
+            position: relative;
+        }
+        
+        .text-collapsed {
+            display: -webkit-box;
+            -webkit-line-clamp: 4;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            line-height: 1.5;
+            max-height: 6em;
+        }
+        
+        .text-expanded {
+            display: block;
+        }
+        
+        /* Responsive design */
+        @media (max-width: 768px) {
+            .top-header {
+                padding: 8px 16px;
+            }
+            
+            .top-header-content {
+                flex-direction: column;
+                gap: 12px;
+                align-items: flex-start;
+            }
+            
+            .user-section {
+                width: 100%;
+                justify-content: flex-end;
+            }
+            
+            .user-details-small {
+                display: none;
+            }
+            
+            .tabs-list {
+                flex-direction: column;
+            }
+            
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            .monitor-controls {
+                flex-direction: column;
+            }
+            
+            .filter-controls {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 8px;
+            }
+            
+            .container {
+                padding: 16px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Top Header -->
+    <header class="top-header">
+        <div class="top-header-content">
+            <!-- Logo -->
+            <a href="/" class="logo">
+                <span>🔍</span>
+                <span>부정댓글 탐지기</span>
+            </a>
+            
+            <!-- User Section -->
+            <div class="user-section">
+                <!-- 로그인 전 -->
+                <div id="login-button">
+                    <button class="button button-accent" onclick="showLoginModal()">🔐 로그인</button>
+                </div>
+                
+                <!-- 로그인 후 -->
+                <div id="user-info-header" class="user-info-header" style="display: none;">
+                    <img class="user-avatar-small" id="user-avatar-header" src="" alt="User">
+                    <div class="user-details-small">
+                        <div class="user-name-small" id="user-name-header"></div>
+                        <div class="user-email-small" id="user-email-header"></div>
+                    </div>
+                    <button class="button button-secondary" onclick="logoutUser()" style="padding: 6px 12px; font-size: 0.75rem; margin-left: 8px;">로그아웃</button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- Page Title -->
+        <div class="header">
+            <h1 class="title">AI 기반 실시간 리뷰 감정 분석 시스템</h1>
+            <p class="subtitle">쇼핑몰 리뷰를 크롤링하고 부정적인 댓글을 자동으로 탐지합니다</p>
+        </div>
+        
+        <!-- Main Content -->
+        <div>
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">카페24 API 인증</h3>
+                    </div>
+                    <div class="supported-sites">
+                        카페24 API를 통한 실제 쇼핑몰 리뷰 분석 및 자동 부정리뷰 탐지 (OAuth 인증 필요)
+                    </div>
+                    
+                    <!-- 인증 상태 -->
+                    <div class="status-indicator" id="auth-status">
+                        <div style="text-align: center;">
+                            <button class="button button-accent" onclick="checkAuthStatus()">🔐 인증 상태 확인</button>
+                        </div>
+                    </div>
+                    
+                    <!-- 카페24 기능들 -->
+                    <div class="monitor-controls">
+                        <button class="button button-accent" onclick="getLatestReviews()">📝 최신 리뷰 분석</button>
+                        <button class="button button-secondary" onclick="getProducts()">📦 상품 목록</button>
+                        <button class="button button-success" onclick="sendChannelTalkTest()">💬 채널톡 테스트 메시지</button>
+                    </div>
+                </div>
+                
+                <!-- 카카오톡 알림 (재사용을 위해 주석처리) -->
+                <!--
+                <div class="card" style="margin-top: 16px;">
+                    <div class="card-header">
+                        <h3 class="card-title">📱 카카오톡 알림</h3>
+                    </div>
+                    <div class="supported-sites">
+                        웹훅으로 부정 리뷰 발견 시 자동 알림 전송
+                    </div>
+                    
+                    <div class="status-indicator" id="kakao-status" style="text-align: center;">
+                        <span id="kakao-connection-status">🔄 연동 상태 확인중...</span>
+                    </div>
+                    
+                    <div class="status-indicator" id="monitor-status" style="margin: 16px 0; text-align: center; display: none;"></div>
+                    
+                    <div class="monitor-controls">
+                        <button class="button button-secondary" onclick="sendKakaoTestMessage()">🧪 테스트 메시지 전송</button>
+                        <button class="button button-outline" onclick="forceKakaoReauth()" style="margin-left: 8px;">🔄 카카오톡 재인증</button>
+                    </div>
+                </div>
+                -->
+                
+                <!-- 채널톡 알림 -->
+                <div class="card" style="margin-top: 16px;">
+                    <div class="card-header">
+                        <h3 class="card-title">💬 채널톡 알림</h3>
+                    </div>
+                    <div class="supported-sites">
+                        웹훅으로 부정 리뷰 발견 시 '🖤부정VOC' 그룹에 자동 알림 전송
+                    </div>
+                    
+                    <!-- 채널톡 연동 상태 -->
+                    <div class="status-indicator" id="channel-talk-status" style="text-align: center;">
+                        <span id="channel-talk-connection-status">🔄 연동 상태 확인중...</span>
+                    </div>
+                    
+                    <!-- 채널톡 메시지 상태 -->
+                    <div class="status-indicator" id="channel-talk-monitor-status" style="margin: 16px 0; text-align: center; display: none;"></div>
+                    
+                    <!-- 테스트 버튼 -->
+                    <div class="monitor-controls">
+                        <button class="button button-secondary" onclick="sendChannelTalkTestMessage()">🧪 테스트 메시지 전송</button>
+                    </div>
+                </div>
+            </div>
+        
+        <!-- Loading indicator -->
+        <div class="loading">
+            <div class="spinner"></div>
+            <p>분석 중...</p>
+        </div>
+        
+        <!-- Error display -->
+        <div class="error" id="error"></div>
+        
+        <!-- Results display -->
+        <div id="results"></div>
+    </div>
+    
+    <!-- Login Modal -->
+    <div id="login-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">🔐 로그인</h3>
+                <button class="modal-close" onclick="closeLoginModal()">&times;</button>
+            </div>
+            <form id="login-form" onsubmit="handleLogin(event)">
+                <div style="margin-bottom: 16px;">
+                    <label for="username" style="display: block; margin-bottom: 8px; font-size: 0.875rem; font-weight: 500;">아이디</label>
+                    <input type="text" id="username" class="input" placeholder="아이디를 입력하세요" required>
+                </div>
+                <div style="margin-bottom: 20px;">
+                    <label for="password" style="display: block; margin-bottom: 8px; font-size: 0.875rem; font-weight: 500;">패스워드</label>
+                    <input type="password" id="password" class="input" placeholder="패스워드를 입력하세요" required>
+                </div>
+                <div id="login-error" class="error" style="display: none; margin-bottom: 16px;"></div>
+                <div style="text-align: center;">
+                    <button type="submit" class="button button-primary" id="login-submit-btn">
+                        로그인
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <script>
+        // 기존 JavaScript 코드들을 여기에 포함 (동일하게 유지)
+        
+        // 브라우저 알림 관련 함수들
+        async function requestNotificationPermission() {
+            if (!("Notification" in window)) {
+                console.log("이 브라우저는 알림을 지원하지 않습니다.");
+                return false;
+            }
+            
+            if (Notification.permission === "granted") {
+                return true;
+            }
+            
+            if (Notification.permission !== "denied") {
+                const permission = await Notification.requestPermission();
+                return permission === "granted";
+            }
+            
+            return false;
+        }
+        
+        function sendBrowserNotification(title, body, icon = "🔔") {
+            if (Notification.permission === "granted") {
+                const notification = new Notification(title, {
+                    body: body,
+                    icon: '/static/icon.png',
+                    badge: '/static/badge.png',
+                    tag: 'negative-comment-detector',
+                    requireInteraction: true,
+                    silent: false
+                });
+                
+                notification.onclick = function() {
+                    window.focus();
+                    notification.close();
+                };
+                
+                setTimeout(() => {
+                    notification.close();
+                }, 5000);
+            }
+        }
+        
+        // 알림 체크 인터벌
+        let notificationInterval = null;
+        
+        function startNotificationPolling() {
+            if (notificationInterval) {
+                clearInterval(notificationInterval);
+            }
+            
+            notificationInterval = setInterval(async () => {
+                try {
+                    const response = await fetch('/get_notifications');
+                    const data = await response.json();
+                    
+                    if (data.notifications && data.notifications.length > 0) {
+                        data.notifications.forEach(notification => {
+                            sendBrowserNotification(notification.title, notification.body);
+                            
+                            if (notification.type === 'negative') {
+                                showMonitorStatus(`⚠️ 부정 리뷰 ${notification.negative_count}개 발견! (총 신규 리뷰 ${notification.new_count}개)`, 'negative');
+                            } else {
+                                showMonitorStatus(`📝 신규 리뷰 ${notification.new_count}개 발견!`, 'new');
+                            }
+                        });
+                    }
+                } catch (error) {
+                    console.error('알림 확인 오류:', error);
+                }
+            }, 300000);
+        }
+        
+        function stopNotificationPolling() {
+            if (notificationInterval) {
+                clearInterval(notificationInterval);
+                notificationInterval = null;
+            }
+        }
+        
+        window.addEventListener('load', function() {
+            requestNotificationPermission();
+            checkAuthStatus();
+            // checkKakaoConnectionStatus(); // 카카오톡 사용하지 않음
+            checkChannelTalkConnectionStatus(); // 채널톡 상태 확인
+        });
+        
+        
+        async function stopMonitoring() {
+            showLoading(true);
+            hideError();
+            
+            try {
+                const response = await fetch('/stop_monitoring', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showMonitorStatus(data.message, 'info');
+                    document.querySelector('.button-accent').disabled = false;
+                    document.querySelector('.button-destructive').disabled = true;
+                    
+                    stopNotificationPolling();
+                } else {
+                    showError(data.error || '모니터링 정지 중 오류가 발생했습니다.');
+                }
+            } catch (error) {
+                showError('서버 연결 오류: ' + error.message);
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        
+        function showMonitorStatus(message, type, elementId = 'monitor-status') {
+            const statusDiv = document.getElementById(elementId);
+            if (!statusDiv) {
+                console.error('Status element not found:', elementId);
+                return;
+            }
+            
+            statusDiv.innerHTML = message.replace(/\\\\n/g, '<br>');
+            statusDiv.className = 'status-indicator';
+            statusDiv.style.display = 'block';
+            
+            if (type === 'success' || type === 'active') {
+                statusDiv.classList.add('status-active');
+            } else if (type === 'inactive') {
+                statusDiv.classList.add('status-inactive');
+            } else if (type === 'negative') {
+                statusDiv.classList.add('status-inactive');
+            }
+            
+            // 성공 메시지는 5초 후 자동 숨기기
+            if (type === 'success') {
+                setTimeout(() => {
+                    if (statusDiv) {
+                        statusDiv.style.display = 'none';
+                    }
+                }, 5000);
+            }
+        }
+        
+        function showLoading(show) {
+            document.querySelector('.loading').style.display = show ? 'block' : 'none';
+            document.querySelectorAll('.button').forEach(btn => btn.disabled = show);
+        }
+        
+        function showError(message) {
+            const errorDiv = document.getElementById('error');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+        }
+        
+        function hideError() {
+            document.getElementById('error').style.display = 'none';
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // ===== 인증 관련 함수들 =====
+        
+        let isAuthenticated = false;
+        let currentUser = null;
+        
+        async function checkAuthStatus() {
+            try {
+                const response = await fetch('/auth/status');
+                const data = await response.json();
+                
+                if (data.authenticated) {
+                    isAuthenticated = true;
+                    currentUser = data.user;
+                    showUserInfo(data.user);
+                } else {
+                    isAuthenticated = false;
+                    currentUser = null;
+                    showLoginButton();
+                }
+            } catch (error) {
+                console.error('인증 상태 확인 오류:', error);
+                showLoginButton();
+            }
+        }
+        
+        function showUserInfo(user) {
+            document.getElementById('login-button').style.display = 'none';
+            document.getElementById('user-info-header').style.display = 'flex';
+            document.getElementById('user-name-header').textContent = user.name || user.username;
+            document.getElementById('user-email-header').textContent = user.email || '';
+            document.getElementById('user-avatar-header').src = user.picture || 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMTYiIGN5PSIxNiIgcj0iMTYiIGZpbGw9IiNmNWY1ZjUiLz4KPHBhdGggZD0iTTE2IDhDMTMuNzkgOCAxMiA5Ljc5IDEyIDEyQzEyIDE0LjIxIDEzLjc5IDE2IDE2IDE2QzE4LjIxIDE2IDIwIDE0LjIxIDIwIDEyQzIwIDkuNzkgMTguMjEgOCAxNiA4WiIgZmlsbD0iIzk5OTk5OSIvPgo8cGF0aCBkPSJNMTYgMThDMTIuNjkgMTggMTAgMjAuNjkgMTAgMjRIMjJDMjIgMjAuNjkgMTkuMzEgMTggMTYgMThaIiBmaWxsPSIjOTk5OTk5Ii8+Cjwvc3ZnPgo=';
+        }
+        
+        function showLoginButton() {
+            document.getElementById('user-info-header').style.display = 'none';
+            document.getElementById('login-button').style.display = 'block';
+        }
+        
+        function showLoginModal() {
+            document.getElementById('login-modal').style.display = 'block';
+        }
+        
+        function closeLoginModal() {
+            document.getElementById('login-modal').style.display = 'none';
+            document.getElementById('login-form').reset();
+            document.getElementById('login-error').style.display = 'none';
+        }
+        
+        async function handleLogin(event) {
+            event.preventDefault();
+            
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value.trim();
+            const submitBtn = document.getElementById('login-submit-btn');
+            const errorDiv = document.getElementById('login-error');
+            
+            if (!username || !password) {
+                showLoginError('아이디와 패스워드를 입력해주세요.');
+                return;
+            }
+            
+            submitBtn.disabled = true;
+            submitBtn.textContent = '로그인 중...';
+            errorDiv.style.display = 'none';
+            
+            try {
+                const response = await fetch('/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    isAuthenticated = true;
+                    currentUser = data.user;
+                    showUserInfo(data.user);
+                    closeLoginModal();
+                } else {
+                    showLoginError(data.error || '로그인에 실패했습니다.');
+                }
+            } catch (error) {
+                showLoginError('서버 연결 오류: ' + error.message);
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = '로그인';
+            }
+        }
+        
+        function showLoginError(message) {
+            const errorDiv = document.getElementById('login-error');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+        }
+        
+        async function logoutUser() {
+            try {
+                const response = await fetch('/logout', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                if (response.ok) {
+                    isAuthenticated = false;
+                    currentUser = null;
+                    showLoginButton();
+                    // 페이지 새로고침으로 상태 초기화
+                    window.location.reload();
+                } else {
+                    const data = await response.json();
+                    showError(data.error || '로그아웃 실패');
+                }
+            } catch (error) {
+                showError('로그아웃 오류: ' + error.message);
+            }
+        }
+        
+        function requireAuth(callback) {
+            if (!isAuthenticated) {
+                showLoginModal();
+                return false;
+            }
+            return callback();
+        }
+        
+        // Modal 외부 클릭 시 닫기
+        window.onclick = function(event) {
+            const modal = document.getElementById('login-modal');
+            if (event.target === modal) {
+                closeLoginModal();
+            }
+        }
+        
+        
+        
+        // 텍스트 펼치기/접기 함수
+        function createExpandableText(text, maxLength = 100) {
+            if (!text) {
+                return '';
+            }
+            
+            // 짧은 텍스트는 그대로 반환
+            if (text.length <= maxLength) {
+                return `<div style="line-height: 1.5;">${escapeHtml(text)}</div>`;
+            }
+            
+            const id = 'text_' + Math.random().toString(36).substr(2, 9);
+            
+            return `
+                <div class="expandable-text">
+                    <div id="${id}" class="text-collapsed">
+                        ${escapeHtml(text)}
+                    </div>
+                    <button class="button button-secondary" onclick="toggleText('${id}')" style="margin-top: 8px; padding: 4px 8px; font-size: 0.75rem;">
+                        더 보기 ▼
+                    </button>
+                </div>
+            `;
+        }
+        
+        function toggleText(id) {
+            const textElement = document.getElementById(id);
+            const button = textElement.nextElementSibling;
+            
+            if (textElement.classList.contains('text-collapsed')) {
+                textElement.classList.remove('text-collapsed');
+                textElement.classList.add('text-expanded');
+                button.innerHTML = '접기 ▲';
+            } else {
+                textElement.classList.remove('text-expanded');
+                textElement.classList.add('text-collapsed');
+                button.innerHTML = '더 보기 ▼';
+            }
+        }
+        
+        // 날짜 포맷팅 함수
+        function formatDate(dateString) {
+            if (!dateString || dateString === 'N/A') {
+                return 'N/A';
+            }
+            
+            try {
+                const date = new Date(dateString);
+                const year = date.getFullYear();
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                const hours = String(date.getHours()).padStart(2, '0');
+                const minutes = String(date.getMinutes()).padStart(2, '0');
+                
+                return `${year}-${month}-${day} ${hours}:${minutes}`;
+            } catch (error) {
+                return dateString.replace(/\+\d{2}:\d{2}$/, '');
+            }
+        }
+        
+        // 리뷰 필터링 함수
+        function filterReviews(containerId, filterType) {
+            const container = document.getElementById(containerId + '_container');
+            const reviewCards = container.querySelectorAll('.result-card');
+            
+            reviewCards.forEach(card => {
+                const reviewType = card.getAttribute('data-review-type');
+                
+                if (filterType === 'all') {
+                    card.style.display = 'block';
+                } else if (filterType === reviewType) {
+                    card.style.display = 'block';
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+        }
+        
+        // ===== 카페24 API 함수들 =====     
+        
+        async function checkAuthStatus() {
+            try {
+                // 사용자 로그인 상태 확인
+                const userResponse = await fetch('/user/status');
+                const userData = await userResponse.json();
+                
+                if (userData.authenticated) {
+                    showUserInfo(userData.user);
+                } else {
+                    showLoginButton();
+                }
+                
+                // 카페24 API 토큰 상태 확인
+                const response = await fetch('/auth/status');
+                const data = await response.json();
+                
+                const authStatusDiv = document.getElementById('auth-status');
+                
+                if (data.authenticated && data.token_valid) {
+                    authStatusDiv.innerHTML = `
+                        <div style="color: var(--success); text-align: center;">
+                            ✅ 카페24 API 인증 완료<br>
+                            <small>만료 시간: ${data.expires_at}</small><br>
+                            <small>권한: ${data.scopes.join(', ')}</small>
+                        </div>
+                    `;
+                    authStatusDiv.className = 'status-indicator status-active';
+                } else {
+                    authStatusDiv.innerHTML = `
+                        <div style="color: var(--destructive); text-align: center;">
+                            ❌ 카페24 API 인증 필요<br>
+                            <small>${data.message}</small><br>
+                            <button class="button button-accent" onclick="startOAuth()" style="margin-top: 8px;">🔐 OAuth 인증 시작</button>
+                        </div>
+                    `;
+                    authStatusDiv.className = 'status-indicator status-inactive';
+                }
+                
+                authStatusDiv.style.display = 'block';
+            } catch (error) {
+                showError('인증 상태 확인 오류: ' + error.message);
+            }
+        }
+        
+        async function startOAuth() {
+            try {
+                const response = await fetch('/auth/start');
+                const data = await response.json();
+                
+                if (response.ok) {
+                    const popup = window.open(data.auth_url, 'cafe24_auth', 'width=600,height=700,scrollbars=yes,resizable=yes');
+                    
+                    const checkInterval = setInterval(async () => {
+                        try {
+                            // 팝업이 닫혔는지 확인
+                            if (popup.closed) {
+                                clearInterval(checkInterval);
+                                // 인증 상태 재확인
+                                checkAuthStatus();
+                                return;
+                            }
+                            
+                            // 인증 상태 확인
+                            const statusResponse = await fetch('/auth/status');
+                            const statusData = await statusResponse.json();
+                            
+                            if (statusData.authenticated && statusData.token_valid) {
+                                clearInterval(checkInterval);
+                                popup.close();
+                                checkAuthStatus();
+                                showMonitorStatus('🎉 OAuth 인증이 완료되었습니다!', 'success');
+                            }
+                        } catch (error) {
+                            // 팝업 접근 오류는 무시
+                        }
+                    }, 2000);
+                    
+                    setTimeout(() => {
+                        clearInterval(checkInterval);
+                        if (!popup.closed) {
+                            popup.close();
+                        }
+                    }, 60000);
+                    
+                    showMonitorStatus('팝업에서 OAuth 인증을 진행해주세요...', 'info');
+                } else {
+                    showError(data.error || 'OAuth 시작 오류');
+                }
+            } catch (error) {
+                showError('OAuth 시작 오류: ' + error.message);
+            }
+        }
+                
+        // ===== 채널톡 알림 함수들 =====
+        
+        async function checkChannelTalkConnectionStatus() {
+            try {
+                const response = await fetch('/auth/channel-talk/status');
+                const data = await response.json();
+                const statusSpan = document.getElementById('channel-talk-connection-status');
+                const statusDiv = document.getElementById('channel-talk-status');
+                
+                if (data.authenticated) {
+                    statusSpan.textContent = '🟢 채널톡 연동 ON';
+                    statusSpan.style.color = 'var(--success)';
+                    statusDiv.className = 'status-indicator status-active';
+                } else {
+                    statusSpan.textContent = '🔴 채널톡 연동 OFF';
+                    statusSpan.style.color = 'var(--destructive)';
+                    statusDiv.className = 'status-indicator status-inactive';
+                }
+            } catch (error) {
+                const statusSpan = document.getElementById('channel-talk-connection-status');
+                const statusDiv = document.getElementById('channel-talk-status');
+                statusSpan.textContent = '❌ 연동 상태 확인 실패';
+                statusSpan.style.color = 'var(--destructive)';
+                statusDiv.className = 'status-indicator status-inactive';
+                console.error('채널톡 상태 확인 오류:', error);
+            }
+        }
+        
+        async function sendChannelTalkTestMessage() {
+            try {
+                // 먼저 채널톡 연동 상태 확인
+                const statusResponse = await fetch('/auth/channel-talk/status');
+                const statusData = await statusResponse.json();
+                
+                if (!statusData.authenticated) {
+                    showError('채널톡 인증이 필요합니다. API 토큰과 시크릿을 확인해주세요.');
+                    return;
+                }
+                
+                // 연동 상태가 정상이면 메시지 전송
+                const response = await fetch('/test/channel-talk-notification', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        message: '테스트 메시지입니다. 채널톡 알림이 정상적으로 작동하고 있습니다! 🎉'
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showChannelTalkMonitorStatus('💬 채널톡 테스트 메시지가 전송되었습니다!', 'success');
+                    hideError(); // 성공 시 에러 메시지 숨김
+                } else {
+                    showError(data.error || '채널톡 메시지 전송 오류');
+                }
+            } catch (error) {
+                showError('채널톡 메시지 전송 오류: ' + error.message);
+            }
+        }
+        
+        function showChannelTalkMonitorStatus(message, type) {
+            const statusDiv = document.getElementById('channel-talk-monitor-status');
+            statusDiv.textContent = message;
+            statusDiv.style.display = 'block';
+            
+            statusDiv.className = `status-indicator ${type === 'success' ? 'status-active' : 'status-inactive'}`;
+            statusDiv.style.color = type === 'success' ? 'var(--success)' : 
+                                   type === 'warning' ? 'var(--warning)' : 'var(--info)';
+            
+            // 5초 후 자동 숨김
+            setTimeout(() => {
+                statusDiv.style.display = 'none';
+            }, 5000);
+        }
+        
+        async function getLatestReviews() {
+            return requireAuth(() => {
+                return performGetLatestReviews();
+            });
+        }
+        
+        async function performGetLatestReviews() {
+            showLoading(true);
+            hideError();
+            
+            try {
+                const response = await fetch('/api/reviews/latest?limit=10', {
+                    credentials: 'include'
+                });
+                const data = await response.json();
+                
+                if (response.ok) {
+                    displayCafe24Results(data, '📝 최신 리뷰 분석 결과');
+                } else {
+                    showError(data.error || '최신 리뷰 조회 오류');
+                }
+            } catch (error) {
+                showError('서버 연결 오류: ' + error.message);
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        
+        async function getProducts() {
+            return requireAuth(() => performGetProducts());
+        }
+        
+        async function performGetProducts() {
+            showLoading(true);
+            hideError();
+            
+            try {
+                const response = await fetch('/api/products?limit=10');
+                const data = await response.json();
+                
+                if (response.ok) {
+                    displayProductsResults(data);
+                } else {
+                    showError(data.error || '상품 조회 오류');
+                }
+            } catch (error) {
+                showError('서버 연결 오류: ' + error.message);
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        // 채널톡 테스트 메시지 전송 (기존 엔드포인트 사용)
+        async function sendChannelTalkTest() {
+            await testChannelTalkNotification();
+        }
+        
+        
+        async function performSearchReviews(keyword) {
+            showLoading(true);
+            hideError();
+            
+            try {
+                const response = await fetch(`/api/reviews/search?keyword=${encodeURIComponent(keyword)}&limit=10`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    displayCafe24Results(data, `🔎 "${keyword}" 검색 결과`);
+                } else {
+                    showError(data.error || '리뷰 검색 오류');
+                }
+            } catch (error) {
+                showError('서버 연결 오류: ' + error.message);
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        function displayCafe24Results(data, title) {
+            const resultsDiv = document.getElementById('results');
+            let html = `<div class="card"><h2 class="card-title">${title}</h2></div>`;
+            
+            // 통계 요약
+            if (data.statistics) {
+                html += `
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title">📊 분석 통계</h3>
+                        </div>
+                        <div class="stats-grid">
+                            <div class="stat-item">
+                                <div class="stat-value">${data.statistics.total}</div>
+                                <div class="stat-label">전체 리뷰</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value" style="color: var(--destructive);">${data.statistics.negative}</div>
+                                <div class="stat-label">부정 리뷰</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value" style="color: var(--success);">${data.statistics.positive}</div>
+                                <div class="stat-label">긍정 리뷰</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value">${data.statistics.negative_ratio}%</div>
+                                <div class="stat-label">부정 비율</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // 부정 리뷰 우선 표시
+            if (data.negative_reviews && data.negative_reviews.length > 0) {
+                html += '<h3 style="margin: 30px 0 15px;">⚠️ 부정 리뷰</h3>';
+                data.negative_reviews.forEach(review => {
+                    html += `
+                        <div class="result-card negative">
+                            <div class="result-label">🚨 부정 리뷰<br><strong>${escapeHtml(review.title || '')}</strong></div>
+                            <div class="result-text">${createExpandableText(review.content || '', 100)}</div>
+                            <div class="result-score">
+                                작성자: ${escapeHtml(review.writer || 'unknown')} | 
+                                상품: ${escapeHtml(review.product_name || '알 수 없음')} (번호: ${review.product_no}) | 
+                                평점: ${'★'.repeat(review.rating || 0)} |
+                                작성일: ${formatDate(review.created_date)}
+                            </div>
+                        </div>
+                    `;
+                });
+            }
+            
+            // 전체 리뷰 with 필터링
+            if (data.reviews && data.reviews.length > 0) {
+                const reviewId = 'reviews_' + Math.random().toString(36).substr(2, 9);
+                html += `
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title" style="display: inline-block; margin-right: 20px;">📝 전체 리뷰</h3>
+                            <div class="filter-controls">
+                                <label class="filter-label">
+                                    <input type="radio" name="${reviewId}" value="all" checked onchange="filterReviews('${reviewId}', 'all')">
+                                    전체 (${data.reviews.length}개)
+                                </label>
+                                <label class="filter-label">
+                                    <input type="radio" name="${reviewId}" value="negative" onchange="filterReviews('${reviewId}', 'negative')">
+                                    부정 (${data.reviews.filter(r => r.is_negative).length}개)
+                                </label>
+                                <label class="filter-label">
+                                    <input type="radio" name="${reviewId}" value="positive" onchange="filterReviews('${reviewId}', 'positive')">
+                                    긍정 (${data.reviews.filter(r => r.is_positive).length}개)
+                                </label>
+                                <label class="filter-label">
+                                    <input type="radio" name="${reviewId}" value="neutral" onchange="filterReviews('${reviewId}', 'neutral')">
+                                    보통 (${data.reviews.filter(r => r.is_neutral).length}개)
+                                </label>
+                            </div>
+                        </div>
+                        <div id="${reviewId}_container">
+                `;
+                
+                // 모든 리뷰 렌더링 (처음 10개만)
+                data.reviews.slice(0, 10).forEach(review => {
+                    let cardClass, label, filterClass, reviewType;
+                    
+                    if (review.is_negative) {
+                        cardClass = 'negative';
+                        label = '부정';
+                        filterClass = 'review-negative';
+                        reviewType = 'negative';
+                    } else if (review.is_positive) {
+                        cardClass = 'positive';
+                        label = '긍정';
+                        filterClass = 'review-positive';
+                        reviewType = 'positive';
+                    } else {
+                        cardClass = 'neutral';
+                        label = '보통';
+                        filterClass = 'review-neutral';
+                        reviewType = 'neutral';
+                    }
+                    
+                    html += `
+                        <div class="result-card ${cardClass} ${filterClass}" data-review-type="${reviewType}">
+                            <div class="result-label">${label}<br><strong>${escapeHtml(review.title || '')}</strong></div>
+                            <div class="result-text">${createExpandableText(review.content || '', 100)}</div>
+                            <div class="result-score">
+                                작성자: ${escapeHtml(review.writer || 'unknown')} | 
+                                상품: ${escapeHtml(review.product_name || '알 수 없음')} (번호: ${review.product_no}) | 
+                                평점: ${'★'.repeat(review.rating || 0)} |
+                                작성일: ${formatDate(review.created_date)}
+                            </div>
+                        </div>
+                    `;
+                });
+                html += '</div></div>';
+            }
+            
+            resultsDiv.innerHTML = html;
+            resultsDiv.style.display = 'block';
+        }
+        
+        
+        function displayProductsResults(data) {
+            const resultsDiv = document.getElementById('results');
+            let html = '<div class="card"><h2 class="card-title">📦 상품 목록</h2></div>';
+            
+            if (data.products && data.products.length > 0) {
+                data.products.forEach(product => {
+                    html += `
+                        <div class="result-card">
+                            <div class="result-label">${escapeHtml(product.product_name)}</div>
+                            <div class="result-text">
+                                상품번호: ${product.product_no} | 
+                                상품코드: ${product.product_code} | 
+                                가격: ${Math.floor(parseFloat(product.price))}원
+                            </div>
+                            <div class="result-score">
+                                노출상태: ${product.display === 'T' ? '노출' : '숨김'}
+                            </div>
+                        </div>
+                    `;
+                });
+            } else {
+                html += '<div class="card"><p>상품을 찾을 수 없습니다.</p></div>';
+            }
+            
+            resultsDiv.innerHTML = html;
+            resultsDiv.style.display = 'block';
+        }
+        
+    </script>
+</body>
+</html>

@@ -1,9 +1,19 @@
-flask
-flask-cors
-transformers
-torch
-numpy
-beautifulsoup4
-selenium
-requests
-lxml
+# Flask 웹 프레임워크
+Flask==3.1.2
+flask-cors==6.0.1
+gunicorn==23.0.0
+
+# 머신러닝 (경량 pkl 모델용)
+scikit-learn==1.5.1
+joblib==1.4.2
+numpy==1.26.4
+
+# HTTP 요청 및 OAuth 인증
+requests==2.32.5
+requests-oauthlib==2.0.0
+
+# OpenAI API
+openai==1.51.2
+
+# 환경 설정
+python-dotenv==1.1.1
