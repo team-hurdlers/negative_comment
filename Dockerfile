@@ -33,6 +33,6 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:$PORT/ || exit 1
 
 # Gunicorn으로 프로덕션 서버 실행 (메모리 최적화)
-CMD exec gunicorn --bind :$PORT --workers 1 --threads 4 --timeout 0 \
+CMD exec gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 0 \
     --max-requests 1000 --max-requests-jitter 100 \
-    --preload app:app
+    --preload main:app

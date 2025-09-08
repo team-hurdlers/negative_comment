@@ -33,7 +33,9 @@ from functools import wraps
 from config.settings import settings
 warnings.filterwarnings('ignore')
 
-app = Flask(__name__)
+app = Flask(__name__, 
+            template_folder='app/templates',
+            static_folder='app/static')
 CORS(app)
 
 # Flask 세션용 비밀키 설정 (Gunicorn에서도 동작하도록)
